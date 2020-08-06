@@ -46,7 +46,7 @@ describe('[CORE] index.ts', () => {
 
       const channels = [...worker.channels]
       channels[0].send([], [data])
-      await new Promise((r) => setTimeout(r, 5))
+      await new Promise((r) => setTimeout(r, 50))
 
       expect(messages).to.be.deep.equal([{
         to: [],

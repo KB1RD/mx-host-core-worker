@@ -44,7 +44,7 @@ describe('[accounts v0] accounts.ts', () => {
   describe('createAccount', () => {
     it('creates unique key', async function () {
       const accounts = new Set()
-      for (let i = 0; i < 1024; i++) {
+      for (let i = 0; i < 32; i++) {
         const key = await aapi.createAccount()
         expect(accounts).to.not.include(key)
         accounts.add(key)
