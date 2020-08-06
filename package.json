@@ -6,8 +6,9 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "webpack --env dev && webpack --env build && yarn run build:dts",
+    "build:fixmx": "rm -rf node_modules/matrix-js-sdk/lib/*.d.ts",
     "build:docs": "typedoc --mode modules --out .jsdoc src/",
-    "build:dts": "tsc --project tsconfig.json --declaration --emitDeclarationOnly --declarationDir dist/",
+    "build:dts": "yarn run build:fixmx && tsc --project tsconfig.json --declaration --emitDeclarationOnly --declarationDir dist/",
     "dev": "webpack --progress --colors --watch --env dev",
     "check-types": "tsc --noEmit",
     "test": "yarn run test:api",
