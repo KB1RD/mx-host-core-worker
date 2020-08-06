@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "description": "Generic worker code for a Matrix application host",
   "main": "dist/mx-host-core-worker.min.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "build": "webpack --env dev && webpack --env build",
+    "build": "webpack --env dev && webpack --env build && yarn run build:dts",
     "build:docs": "typedoc --mode modules --out .jsdoc src/",
+    "build:dts": "tsc --project tsconfig.json --declaration --emitDeclarationOnly --declarationDir dist/",
     "dev": "webpack --progress --colors --watch --env dev",
     "check-types": "tsc --noEmit",
     "test": "yarn run test:api",
