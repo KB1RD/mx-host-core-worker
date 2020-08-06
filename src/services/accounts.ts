@@ -53,7 +53,12 @@ interface RemoteV0 {
   createAccount(): Promise<string>
   getAccounts(): Promise<string>
   listenAccounts(): AsyncGenerator<string[], void, void>
-  exists(name: string): Promise<boolean>
+
+  [account: string]:
+    | { exists(): Promise<boolean> }
+    | RemoteV0['createAccount']
+    | RemoteV0['getAccounts']
+    | RemoteV0['listenAccounts']
 }
 
 interface Remote {

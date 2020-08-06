@@ -88,18 +88,27 @@ type RoomInfo = {
 }
 
 interface RemoteV0 {
-  getHsUrl(mxid: string): Promise<string>
-  fromToken(mxid: string, token: string, hs?: string): Promise<string>
-  fromPass(user: string, pw: string, hs?: string): Promise<string>
+  getHsUrl: { [mxid: string]: () => Promise<string> }
+  fromToken: {
+    [mxid: string]: () => (token: string, hs?: string) => Promise<string>
+  }
+  fromPass: {
+    [mxid: string]: () => (pw: string, hs?: string) => Promise<string>
+  }
 
-  start(account_id: string): Promise<void>
-  stop(id: string): Promise<boolean>
+  [account: string]:
+    | {
+        start(): Promise<void>
+        stop(): Promise<boolean>
 
-  listenUserState(id: string): AsyncGenerator<ClientState, void, void>
-  listenRoomList(
-    id: string,
-    opts: { avatar?: { width: number; height: number } }
-  ): AsyncGenerator<RoomInfo[], void, void>
+        listenUserState(): AsyncGenerator<ClientState, void, void>
+        listenRoomList(opts: {
+          avatar?: { width: number; height: number }
+        }): AsyncGenerator<RoomInfo[], void, void>
+      }
+    | RemoteV0['getHsUrl']
+    | RemoteV0['fromToken']
+    | RemoteV0['fromPass']
 }
 
 interface Remote {
