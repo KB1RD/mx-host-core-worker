@@ -49,6 +49,17 @@ class Account {
   }
 }
 
+interface RemoteV0 {
+  createAccount(): Promise<string>
+  getAccounts(): Promise<string>
+  listenAccounts(): AsyncGenerator<string[], void, void>
+  exists(name: string): Promise<boolean>
+}
+
+interface Remote {
+  v0: RemoteV0
+}
+
 class ServiceClass implements Service {
   map = new GeneratorListener<{ [uid: string]: Account }>({})
 
@@ -111,4 +122,4 @@ const AccountsService: ServiceDescriptor = prefixServiceRpc({
 })
 
 export default AccountsService
-export { ServiceClass }
+export { ServiceClass, Remote }

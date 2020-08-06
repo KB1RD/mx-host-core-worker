@@ -87,6 +87,25 @@ type RoomInfo = {
   type?: string
 }
 
+interface RemoteV0 {
+  getHsUrl(mxid: string): Promise<string>
+  fromToken(mxid: string, token: string, hs?: string): Promise<string>
+  fromPass(user: string, pw: string, hs?: string): Promise<string>
+
+  start(account_id: string): Promise<void>
+  stop(id: string): Promise<boolean>
+
+  listenUserState(id: string): AsyncGenerator<ClientState, void, void>
+  listenRoomList(
+    id: string,
+    opts: { avatar?: { width: number; height: number } }
+  ): AsyncGenerator<RoomInfo[], void, void>
+}
+
+interface Remote {
+  v0: RemoteV0
+}
+
 class ServiceClass implements Service {
   protected readonly account_svc: AccountsService.ServiceClass
   protected readonly clients: { [uid: string]: mx.MatrixClient } = {}
@@ -284,7 +303,7 @@ class ServiceClass implements Service {
     return false
   }
 
-  ensureAccountStateExists(id: string) {
+  ensureAccountStateExists(id: string): void {
     if (!this.state_listeners[id]) {
       const account = this.account_svc.getAccount(id)
       let cred: AccountCredentialData
@@ -412,3 +431,4 @@ const MatrixService: ServiceDescriptor = prefixServiceRpc({
 })
 
 export default MatrixService
+export { ServiceClass, Remote }

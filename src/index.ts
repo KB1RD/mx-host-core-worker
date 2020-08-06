@@ -18,7 +18,9 @@ import {
   Service
 } from './services/service'
 import AccountsService from './services/accounts'
+import * as AccountsServiceExports from './services/accounts'
 import MatrixService from './services/matrix'
+import * as MatrixServiceExports from './services/matrix'
 import { Serializable } from 'child_process'
 
 const addrToString = (addr: rpc.MultistringAddress) =>
@@ -66,6 +68,10 @@ class KvBackendCache {
     this.origin.set(key, value)
     this.cache[key] = value
   }
+}
+
+interface ServicesRemote {
+  requestServices(...requests: ServiceRequest[]): Promise<ServiceResponse[]>
 }
 
 class MainWorker implements BaseWorker {
@@ -356,4 +362,14 @@ class MainWorker implements BaseWorker {
 
 export default MainWorker
 
-export { BaseWorker }
+interface Remote {
+  net: {
+    kb1rd: {
+      services: ServicesRemote
+      accounts: AccountsServiceExports.Remote
+      mxbindings: MatrixServiceExports.Remote
+    }
+  }
+}
+
+export { BaseWorker, Remote }
