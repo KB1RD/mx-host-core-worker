@@ -44,15 +44,20 @@ function setup({ request } = {}) {
   const tl = createLog('TESTLOG')
 
   const vstore = {}
-  
+
   // Simulate localstorage
   const storage_backend = {
     get(k) {
-      return vstore[k] && JSON.parse(vstore[k])
+      return Promise.resolve(vstore[k] && JSON.parse(vstore[k]))
     },
     set(k, v) {
       tl.info('SET', k, v)
-      vstore[k] = JSON.stringify(v)
+      if (v === undefined || v === null) {
+        delete vstore[k]
+      } else {
+        vstore[k] = JSON.stringify(v)
+      }
+      return Promise.resolve()
     }
   }
 

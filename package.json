@@ -5,8 +5,12 @@
   "main": "dist/mx-host-core-worker.min.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "webpack --env dev && webpack --env build && yarn run build:dts",
+    "build": "yarn run build:fixmx && yarn run build:generic && yarn run build:dts && yarn run build:browserworker && yarn run build:sharedworker && yarn run build:serviceworker",
     "build:fixmx": "rm -rf node_modules/matrix-js-sdk/lib/*.d.ts",
+    "build:generic": "webpack --env dev && webpack --env build",
+    "build:browserworker": "webpack --env browserworker",
+    "build:sharedworker": "webpack --env sharedworker",
+    "build:serviceworker": "webpack --env serviceworker",
     "build:docs": "typedoc --mode modules --out .jsdoc src/",
     "build:dts": "yarn run build:fixmx && tsc --project tsconfig.json --declaration --emitDeclarationOnly --declarationDir dist/",
     "dev": "webpack --progress --colors --watch --env dev",
@@ -70,6 +74,7 @@
   "dependencies": {
     "ajv": "^6.12.3",
     "chalk": "^4.1.0",
+    "localforage": "^1.9.0",
     "loglevel": "^1.6.8",
     "loglevel-plugin-prefix": "^0.8.4",
     "matrix-js-sdk": "^7.1.0",

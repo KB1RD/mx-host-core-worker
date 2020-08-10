@@ -809,3 +809,10 @@ declare module 'matrix-js-sdk/lib/matrix' {
 
   export function createClient(ops: string | CreateClientOption): MatrixClient;
 }
+
+// Used to include just the Matrix JS SDK browser setup
+declare module 'matrix-js-sdk/lib/browser-index' {
+  // avoid requiring 'request' type
+  export function request(r: any): void;
+  export function getRequest(): any;
+}

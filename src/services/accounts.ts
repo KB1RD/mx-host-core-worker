@@ -12,7 +12,7 @@ import {
   SemverVersion,
   prefixServiceRpc
 } from './service'
-import { Serializable } from 'child_process'
+import { OptionalSerializable } from '../storage'
 
 // This really should be in Ajv
 // eslint-disable-next-line
@@ -24,14 +24,21 @@ class Account {
     public readonly parent: ServiceClass
   ) {}
 
-  storageGet(key: string): Serializable {
+  storageGet(key: string): Promise<OptionalSerializable> {
     return this.parent.parent.storage_backend.get(`accounts/${this.uid}/${key}`)
   }
-  storageSet(key: string, value: Serializable): void {
-    this.parent.parent.storage_backend.set(`accounts/${this.uid}/${key}`, value)
+  storageSet(key: string, value: OptionalSerializable): Promise<void> {
+    return this.parent.parent.storage_backend.set(
+      `accounts/${this.uid}/${key}`,
+      value
+    )
   }
-  storageGetSchema<T>(key: string, schema: AjvSchema, def?: T): T {
-    const value = this.storageGet(key)
+  async storageGetSchema<T>(
+    key: string,
+    schema: AjvSchema,
+    def?: T
+  ): Promise<T> {
+    const value = await this.storageGet(key)
     const Validate =
       this.parent.known_data_schema_validators.get(schema) ||
       this.parent.parent.ajv.compile(schema)
@@ -67,6 +74,7 @@ interface Remote {
 
 class ServiceClass implements Service {
   map = new GeneratorListener<{ [uid: string]: Account }>({})
+  has_lazy_loaded = false
 
   /**
    * Keeps track of schema objects that have been used to access data via the
@@ -79,13 +87,34 @@ class ServiceClass implements Service {
     protected readonly log: loglvl.Logger
   ) {}
 
+  @rpc.RpcAddress(['v0', 'lazyLoadAccounts'])
+  async lazyLoadAccounts(force = false): Promise<void> {
+    if (!this.has_lazy_loaded || force) {
+      this.has_lazy_loaded = true
+      const list = await this.parent.storage_backend.get('accounts.list')
+      // IMO manual validation is easier (and probably faster) than schema
+      // validation here
+      if (Array.isArray(list)) {
+        for (const uid of list) {
+          if (typeof uid === 'string' && this.map.value[uid]) {
+            this.map.value[uid] = new Account(uid, this)
+          }
+        }
+        this.map.pushUpdate()
+      }
+    }
+  }
+
   @rpc.RpcAddress(['v0', 'createAccount'])
-  createAccount(): string {
+  async createAccount(): Promise<string> {
+    // Even though its random, this should still be loaded to prevent potential
+    // name collisions with shorter account UIDs
+    await this.lazyLoadAccounts()
     let key: string
     do {
       key = ''
       // Create a random unsigned 128 bit uint encoded as base16
-      // (16 groups of 2 chars, 4 bits each)
+      // (16 groups of 2 chars, 4 bits per char)
       for (let i = 0; i < 16; i++) {
         key += Math.floor(Math.random() * 255)
           .toString(16)
@@ -94,16 +123,22 @@ class ServiceClass implements Service {
     } while (this.map.value[key])
     this.map.value[key] = new Account(key, this)
     this.map.pushUpdate()
+    await this.parent.storage_backend.set(
+      'accounts.list',
+      Object.keys(this.map.value)
+    )
     this.log.info(`Created new account UID ${key}`)
     return key
   }
+
   @rpc.RpcAddress(['v0', 'getAccounts'])
-  getAccounts(): string[] {
+  async getAccounts(): Promise<string[]> {
+    await this.lazyLoadAccounts()
     return Object.keys(this.map.value)
   }
-
   @rpc.RpcAddress(['v0', 'listenAccounts'])
   async *listenAccounts(): AsyncGenerator<string[], void, void> {
+    await this.lazyLoadAccounts()
     for await (const map of this.map.generate()) {
       yield Object.keys(map)
     }
@@ -111,7 +146,8 @@ class ServiceClass implements Service {
 
   @rpc.RpcAddress(['v0', undefined, 'exists'])
   @rpc.RemapArguments(['drop', 'expand'])
-  exists(name: string): boolean {
+  async exists(name: string): Promise<boolean> {
+    await this.lazyLoadAccounts()
     return Boolean(this.map.value[name])
   }
 

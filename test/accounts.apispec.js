@@ -11,8 +11,9 @@ describe('[accounts v0] accounts.ts', () => {
   let aapi
   let shutdown
   let generate
+  let vstore
   beforeEach(async function () {
-    ;({ worker, logentries, testlog } = setupWorker())
+    ;({ worker, logentries, testlog, vstore } = setupWorker())
     const channel = new MessageChannel()
     worker.onconnect(channel.port1)
     rpc = new RpcChannel((msg, xfer) => channel.port2.postMessage(msg, xfer))
@@ -52,6 +53,17 @@ describe('[accounts v0] accounts.ts', () => {
     })
     it('creates a 128-bit account ID string (32 nibbles)', async function () {
       expect((await aapi.createAccount()).length).to.be.equal(32)
+    })
+    it('stores new account list', async function () {
+      const accounts = new Set()
+      for (let i = 0; i < 32; i++) {
+        const key = await aapi.createAccount()
+        accounts.add(key)
+      }
+      const stored_list = JSON.parse(vstore['accounts.list'])
+      for (const id of stored_list) {
+        expect(accounts).to.include(id)
+      }
     })
   })
   describe('getAccounts', () => {

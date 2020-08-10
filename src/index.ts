@@ -21,7 +21,7 @@ import AccountsService from './services/accounts'
 import * as AccountsServiceExports from './services/accounts'
 import MatrixService from './services/matrix'
 import * as MatrixServiceExports from './services/matrix'
-import { Serializable } from 'child_process'
+import { KvStorageBackend, KvBackendCache } from './storage'
 
 const addrToString = (addr: rpc.MultistringAddress) =>
   addr
@@ -51,23 +51,6 @@ interface BaseWorker {
   onmessageerror(e: MessageEvent): void
   onoffline(): void
   ononline(): void
-}
-
-interface KvStorageBackend {
-  get(key: string): Serializable
-  set(key: string, value: Serializable): void
-}
-
-class KvBackendCache {
-  protected readonly cache: { [key: string]: Serializable } = {}
-  constructor(protected readonly origin: KvStorageBackend) {}
-  get(key: string): Serializable {
-    return this.cache[key] || this.origin.get(key)
-  }
-  set(key: string, value: Serializable): void {
-    this.origin.set(key, value)
-    this.cache[key] = value
-  }
 }
 
 interface ServicesRemote {

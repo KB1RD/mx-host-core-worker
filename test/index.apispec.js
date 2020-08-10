@@ -51,8 +51,7 @@ describe('[CORE] index.ts', () => {
       expect(messages).to.be.deep.equal([{
         to: [],
         args: [data],
-        return_addr: undefined,
-        return_type: 'promise'
+        return_addr: undefined
       }])
     })
   })

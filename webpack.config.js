@@ -6,18 +6,36 @@ const pkg = require('./package.json');
 let libraryName = pkg.name;
 
 let outputFile, mode;
+let entry = __dirname + '/src/index.ts';
 
-if (env === 'build') {
-  mode = 'production';
-  outputFile = libraryName + '.min.js';
-} else {
-  mode = 'development';
-  outputFile = libraryName + '.js';
+switch (env) {
+  case 'build':
+    mode = 'production';
+    outputFile = libraryName + '.min.js';
+    break;
+  case 'browserworker':
+    mode = 'production';
+    outputFile = libraryName + '-browserworker.min.js';
+    entry = __dirname + '/src/browserworker.ts';
+    break;
+  case 'sharedworker':
+    mode = 'production';
+    outputFile = libraryName + '-sharedworker.min.js';
+    entry = __dirname + '/src/sharedworker.ts';
+    break;
+  case 'serviceworker':
+    mode = 'production';
+    outputFile = libraryName + '-serviceworker.min.js';
+    entry = __dirname + '/src/serviceworker.ts';
+    break;
+  default:
+    mode = 'development';
+    outputFile = libraryName + '.js';
 }
 
 const config = {
-  mode: mode,
-  entry: __dirname + '/src/index.ts',
+  mode,
+  entry,
   devtool: 'source-map',
   output: {
     path: __dirname + '/dist',

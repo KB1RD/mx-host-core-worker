@@ -198,7 +198,7 @@ class ServiceClass implements Service {
     if (!hs) {
       hs = await this.getHsUrl(mxid)
     }
-    const key = this.account_svc.createAccount()
+    const key = await this.account_svc.createAccount()
     const account = this.account_svc.getAccount(key)
     account.storageSet('net.kb1rd.mxbindings.credentials', { mxid, token, hs })
     return key
@@ -238,14 +238,14 @@ class ServiceClass implements Service {
     if (!account) {
       throw new TypeError('Account does not exist')
     }
-    this.ensureAccountStateExists(account_id)
+    await this.ensureAccountStateExists(account_id)
 
     let cred: AccountCredentialData
     try {
-      cred = account.storageGetSchema(
+      cred = (await account.storageGetSchema(
         'net.kb1rd.mxbindings.credentials',
         accountCredentialSchema
-      ) as AccountCredentialData
+      )) as AccountCredentialData
     } catch (e) {
       if (e instanceof ValidationError) {
         throw new TypeError(
@@ -312,15 +312,15 @@ class ServiceClass implements Service {
     return false
   }
 
-  ensureAccountStateExists(id: string): void {
+  async ensureAccountStateExists(id: string): Promise<void> {
     if (!this.state_listeners[id]) {
       const account = this.account_svc.getAccount(id)
       let cred: AccountCredentialData
       try {
-        cred = account.storageGetSchema(
+        cred = (await account.storageGetSchema(
           'net.kb1rd.mxbindings.credentials',
           accountCredentialSchema
-        ) as { mxid: string; token: string; hs: string }
+        )) as { mxid: string; token: string; hs: string }
       } catch (e) {
         this.state_listeners[id] = new GeneratorListener('UNAUTHENTICATED')
         return
@@ -332,8 +332,8 @@ class ServiceClass implements Service {
       }
     }
   }
-  updateAccountState(id: string, state?: AccountState): void {
-    this.ensureAccountStateExists(id)
+  async updateAccountState(id: string, state?: AccountState): Promise<void> {
+    await this.ensureAccountStateExists(id)
     if (state) {
       this.state_listeners[id].value = state
     }
@@ -343,7 +343,7 @@ class ServiceClass implements Service {
   @rpc.RpcAddress(['v0', undefined, 'listenUserState'])
   @rpc.RemapArguments(['drop', 'expand'])
   async *listenUserState(id: string): AsyncGenerator<ClientState, void, void> {
-    this.ensureAccountStateExists(id)
+    await this.ensureAccountStateExists(id)
     const account = this.account_svc.getAccount(id)
     if (!account) {
       throw new TypeError('Account does not exist')
@@ -352,10 +352,10 @@ class ServiceClass implements Service {
     for await (const state of this.state_listeners[id].generate()) {
       let data: AccountCredentialData | undefined
       try {
-        data = account.storageGetSchema(
+        data = (await account.storageGetSchema(
           'net.kb1rd.mxbindings.credentials',
           accountCredentialSchema
-        ) as AccountCredentialData
+        )) as AccountCredentialData
       } catch (e) {
         if (e instanceof ValidationError) {
           data = undefined
