@@ -88,21 +88,35 @@ class ServiceClass implements Service {
   ) {}
 
   @rpc.RpcAddress(['v0', 'lazyLoadAccounts'])
+  @rpc.RemapArguments(['drop', 'drop'])
   async lazyLoadAccounts(force = false): Promise<void> {
     if (!this.has_lazy_loaded || force) {
       this.has_lazy_loaded = true
+      this.log.info(`Loading accounts from storage...`)
       const list = await this.parent.storage_backend.get('accounts.list')
       // IMO manual validation is easier (and probably faster) than schema
       // validation here
       if (Array.isArray(list)) {
+        this.log.info(`Found ${(list || 0) && list.length} accounts in storage`)
         for (const uid of list) {
-          if (typeof uid === 'string' && this.map.value[uid]) {
+          if (typeof uid === 'string' && !this.map.value[uid]) {
             this.map.value[uid] = new Account(uid, this)
           }
         }
         this.map.pushUpdate()
+      } else {
+        this.log.info(`Found empty or corrupt account list`)
       }
     }
+  }
+
+  @rpc.RpcAddress(['v0', 'saveAccountList'])
+  async saveAccountList(): Promise<void> {
+    this.log.info(`Saving account list to storage`)
+    await this.parent.storage_backend.set(
+      'accounts.list',
+      Object.keys(this.map.value)
+    )
   }
 
   @rpc.RpcAddress(['v0', 'createAccount'])
@@ -123,10 +137,7 @@ class ServiceClass implements Service {
     } while (this.map.value[key])
     this.map.value[key] = new Account(key, this)
     this.map.pushUpdate()
-    await this.parent.storage_backend.set(
-      'accounts.list',
-      Object.keys(this.map.value)
-    )
+    await this.saveAccountList()
     this.log.info(`Created new account UID ${key}`)
     return key
   }

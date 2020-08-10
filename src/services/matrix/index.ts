@@ -40,8 +40,7 @@ type AccountCredentialData = {
 /**
  * State of an account. This is distinct from the Matrix JS SDK's state, though
  * it is determined by SDK state. The possibilities are as follows:
- * * `UNAUTHENTICATED` - Credentials are missing and a login flow should be
- * started.
+ * * `UNAUTHENTICATED` - This account is not tied to a Matrix account.
  * * `INACTIVE` - Has not yet been started, but credentials are present.
  * * `STARTING` - Is initial syncing or reconnecting after offline. The user's
  * input should be blocked, but a loading indicator should be shown.
@@ -234,6 +233,21 @@ class ServiceClass implements Service {
   @rpc.RpcAddress(['v0', undefined, 'start'])
   @rpc.RemapArguments(['drop', 'expand'])
   async start(account_id: string): Promise<void> {
+    if (this.clients[account_id]) {
+      const val = this.state_listeners[account_id]?.value
+      if (!val || val === 'INACTIVE' || val === 'UNAUTHENTICATED') {
+        // The account state is corrupt; Try to recover gracefully
+        this.log.warn(
+          'Possible corrupt account state: Client is defined while state is' +
+            'inactive'
+        )
+        this.stop(account_id)
+      } else {
+        // We're already signed in, do nothing
+        return
+      }
+    }
+
     const account = this.account_svc.getAccount(account_id)
     if (!account) {
       throw new TypeError('Account does not exist')
@@ -303,10 +317,12 @@ class ServiceClass implements Service {
   @rpc.RpcAddress(['v0', undefined, 'stop'])
   @rpc.RemapArguments(['drop', 'expand'])
   async stop(id: string): Promise<boolean> {
+    await this.ensureAccountStateExists(id)
     const client = this.clients[id]
     if (client) {
       await client.stopClient()
       this.state_listeners[id].value = 'INACTIVE'
+      delete this.clients[id]
       return true
     }
     return false
@@ -315,16 +331,15 @@ class ServiceClass implements Service {
   async ensureAccountStateExists(id: string): Promise<void> {
     if (!this.state_listeners[id]) {
       const account = this.account_svc.getAccount(id)
-      let cred: AccountCredentialData
+
+      let cred: AccountCredentialData | undefined = undefined
       try {
         cred = (await account.storageGetSchema(
           'net.kb1rd.mxbindings.credentials',
           accountCredentialSchema
         )) as { mxid: string; token: string; hs: string }
-      } catch (e) {
-        this.state_listeners[id] = new GeneratorListener('UNAUTHENTICATED')
-        return
-      }
+      } catch (e) {}
+
       if (!cred) {
         this.state_listeners[id] = new GeneratorListener('UNAUTHENTICATED')
       } else {
@@ -337,7 +352,6 @@ class ServiceClass implements Service {
     if (state) {
       this.state_listeners[id].value = state
     }
-    this.state_listeners[id].pushUpdate()
   }
 
   @rpc.RpcAddress(['v0', undefined, 'listenUserState'])
@@ -346,7 +360,7 @@ class ServiceClass implements Service {
     await this.ensureAccountStateExists(id)
     const account = this.account_svc.getAccount(id)
     if (!account) {
-      throw new TypeError('Account does not exist')
+      throw new TypeError(`Account '${id}' does not exist`)
     }
 
     for await (const state of this.state_listeners[id].generate()) {
