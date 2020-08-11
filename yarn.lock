@@ -5557,10 +5557,10 @@ ripemd160@^2.0.0, ripemd160@^2.0.1:
     hash-base "^3.0.0"
     inherits "^2.0.1"
 
-rpcchannel@^0.2.2:
-  version "0.2.2"
-  resolved "https://registry.yarnpkg.com/rpcchannel/-/rpcchannel-0.2.2.tgz#9ad90712a6ba44c8a6035022fb6eb4298ce1f7b7"
-  integrity sha512-+PudRTccKQ29cavEHodBYbe8681LN/jJpXK4WQ9kFuRmdIF4pdYkB5Xw8JkVRc0bv3JCFxOdp4sNurrkyDdKkg==
+rpcchannel@^0.2.4:
+  version "0.2.4"
+  resolved "https://registry.yarnpkg.com/rpcchannel/-/rpcchannel-0.2.4.tgz#359cd09319b39401c6bc02dcde52648d1424356e"
+  integrity sha512-qWae997S8FyL9Qacd5uWkSDu0+kLBPHdN+JA/3lGaYNkWrQNHseORMUenYNMuYReHejBZ9NPDK56zlPe3RjFsg==
   dependencies:
     ajv "^6.12.3"
 

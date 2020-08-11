@@ -18,8 +18,11 @@ class GeneratorListener<T> {
     return this._value
   }
   set value(v: T) {
+    const update = this._value !== v
     this._value = v
-    this.pushUpdate()
+    if (update) {
+      this.pushUpdate()
+    }
   }
 }
 

@@ -78,6 +78,6 @@
     "loglevel": "^1.6.8",
     "loglevel-plugin-prefix": "^0.8.4",
     "matrix-js-sdk": "^7.1.0",
-    "rpcchannel": "^0.2.2"
+    "rpcchannel": "^0.2.4"
   }
 }
