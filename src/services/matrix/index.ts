@@ -114,17 +114,34 @@ interface Remote {
   v0: RemoteV0
 }
 
+class MatrixInstance {
+  client: mx.MatrixClient | undefined
+  readonly room_list = new GeneratorListener<mx.Room[]>([])
+
+  get active(): boolean {
+    return Boolean(this.client)
+  }
+
+  createClient(opts: mx.CreateClientOption): mx.MatrixClient {
+    return (this.client = mx.createClient(opts))
+  }
+  stopClient(): void {
+    if (this.client) {
+      this.client.stopClient()
+      delete this.client
+      this.room_list.value = []
+    }
+  }
+}
+
 class ServiceClass implements Service {
   protected readonly account_svc: AccountsService.ServiceClass
-  protected readonly clients: { [uid: string]: mx.MatrixClient } = {}
 
   protected readonly state_listeners: {
     [uid: string]: GeneratorListener<AccountState>
   } = {}
 
-  protected readonly room_list_listeners: {
-    [uid: string]: GeneratorListener<mx.Room[]>
-  } = {}
+  protected readonly instances: { [uid: string]: MatrixInstance } = {}
 
   constructor(
     protected readonly parent: MainWorker,
@@ -140,6 +157,13 @@ class ServiceClass implements Service {
         'the JS SDK. This is because the SDK does not support custom ' +
         'request functions for .well-known resolution.'
     )
+  }
+
+  getInstance(uid: string): MatrixInstance {
+    if (!this.instances[uid]) {
+      this.instances[uid] = new MatrixInstance()
+    }
+    return this.instances[uid]
   }
 
   @rpc.RpcAddress(['v0', 'getHsUrl', undefined])
@@ -233,7 +257,7 @@ class ServiceClass implements Service {
   @rpc.RpcAddress(['v0', undefined, 'start'])
   @rpc.RemapArguments(['drop', 'expand'])
   async start(account_id: string): Promise<void> {
-    if (this.clients[account_id]) {
+    if (this.getInstance(account_id).active) {
       const val = this.state_listeners[account_id]?.value
       if (!val || val === 'INACTIVE' || val === 'UNAUTHENTICATED') {
         // The account state is corrupt; Try to recover gracefully
@@ -271,14 +295,17 @@ class ServiceClass implements Service {
     }
 
     this.state_listeners[account_id].value = 'STARTING'
-    const client = (this.clients[account_id] = mx.createClient({
+    const instance = this.getInstance(account_id)
+    const client = instance.createClient({
       userId: cred.mxid,
       baseUrl: cred.hs,
       accessToken: cred.token,
       timelineSupport: true,
       useAuthorizationHeader: true,
       request: this.parent.request
-    }))
+    })
+
+    // STATE LISTENER SETUP ---------------------------------------------------
     client.on('sync', (state: MxState) => {
       switch (state) {
         case 'PREPARED':
@@ -298,11 +325,9 @@ class ServiceClass implements Service {
       }
     })
 
-    if (!this.room_list_listeners[account_id]) {
-      this.room_list_listeners[account_id] = new GeneratorListener([])
-    }
+    // ROOM LIST SETUP --------------------------------------------------------
     const updateRooms = (): void => {
-      this.room_list_listeners[account_id].value = client.getRooms()
+      instance.room_list.value = client.getRooms()
     }
     client.on('Room', updateRooms)
     client.on('Room.name', updateRooms)
@@ -318,11 +343,10 @@ class ServiceClass implements Service {
   @rpc.RemapArguments(['drop', 'expand'])
   async stop(id: string): Promise<boolean> {
     await this.ensureAccountStateExists(id)
-    const client = this.clients[id]
-    if (client) {
-      await client.stopClient()
+    const instance = this.instances[id]
+    if (instance) {
+      await instance.stopClient()
       this.state_listeners[id].value = 'INACTIVE'
-      delete this.clients[id]
       return true
     }
     return false
@@ -417,11 +441,8 @@ class ServiceClass implements Service {
     id: string,
     opts: { avatar?: { width: number; height: number } } = {}
   ): AsyncGenerator<RoomInfo[], void, void> {
-    if (!this.room_list_listeners[id]) {
-      this.room_list_listeners[id] = new GeneratorListener([])
-    }
-    for await (const rooms of this.room_list_listeners[id].generate()) {
-      const client = this.clients[id]
+    const instance = this.getInstance(id)
+    for await (const rooms of instance.room_list.generate()) {
       const getType = (r: mx.Room): string | undefined => {
         const type = r
           .getLiveTimeline()
@@ -435,7 +456,9 @@ class ServiceClass implements Service {
         canon_alias: r.getCanonicalAlias() || undefined,
         avatar_url:
           r.getAvatarUrl(
-            client.getHomeserverUrl(),
+            // Can't be undefined since room list is made blank when there's no
+            // client set up
+            (instance.client as mx.MatrixClient).getHomeserverUrl(),
             opts.avatar?.width || 256,
             opts.avatar?.height || 256,
             'scale',
@@ -450,7 +473,7 @@ class ServiceClass implements Service {
 const MatrixService: ServiceDescriptor = prefixServiceRpc({
   id: ['net', 'kb1rd', 'mxbindings'],
   service: ServiceClass,
-  versions: [{ version: [0, 1, 0] as SemverVersion }]
+  versions: [{ version: [0, 2, 0] as SemverVersion }]
 })
 
 export default MatrixService
