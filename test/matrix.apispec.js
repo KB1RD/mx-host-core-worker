@@ -366,12 +366,12 @@ describe('[matrix v0] matrix/index.ts', () => {
     })
   })
 
+  const setCredentials = (id, cred) => {
+    vstore[
+      `accounts/${id}/net.kb1rd.mxbindings.credentials`
+    ] = JSON.stringify(cred)
+  }
   describe('listenRoomList', () => {
-    const setCredentials = (id, cred) => {
-      vstore[
-        `accounts/${id}/net.kb1rd.mxbindings.credentials`
-      ] = JSON.stringify(cred)
-    }
     const mxClientStartWithState = (id) => mxClientStart(id, () => undefined, {
       next_batch: 'batch_token',
       rooms: {
@@ -558,5 +558,53 @@ describe('[matrix v0] matrix/index.ts', () => {
       ])
       expect(await aapi[id].stop()).to.be.true
     })
+  })
+
+  const basicClientTest = (cb) => async () => {
+    const id = await rpc.call_obj.net.kb1rd.accounts.v0.createAccount()
+    setCredentials(id, {
+      mxid: '@alice:example.com',
+      token: 'abc123',
+      hs: 'https://matrix.example.com'
+    })
+    await mxClientStart(id)
+    await cb(id)
+    await aapi[id].stop()
+  }
+  describe('User Account Data', () => {
+    let mxbindings
+    beforeEach(() => {
+      ;({ mxbindings } = rpc.call_obj.net.kb1rd)
+    })
+    it('send', basicClientTest(async (id) => {
+      http
+        .when(
+          'PUT',
+          '/_matrix/client/r0/user/%40alice%3Aexample.com/account_data/' +
+            'net.kb1rd.test'
+        )
+        .check(({ opts }) => {
+          expect(opts.body).to.be.equal('{"hello":"world"}')
+        })
+        .respond(200)
+      await mxbindings.v0[id].account_data['net.kb1rd.test'].set({
+        hello: "world"
+      })
+      await http.flushAllExpected()
+    }))
+    it('listen', basicClientTest(async (id) => {
+      const sync_response = {
+        next_batch: 'batch_token',
+        rooms: { join: {}, invite: {}, leave: {} },
+        presence: {},
+        account_data: {
+          events: [{ type: 'net.kb1rd.test', content: { hello: 'world' } }]
+        }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+      expect(await mxbindings.v0[id].account_data['net.kb1rd.test'].listen())
+        .to.be.deep.equal({ hello: 'world' })
+    }))
   })
 })

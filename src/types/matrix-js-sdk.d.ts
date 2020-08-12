@@ -170,21 +170,7 @@ declare module 'matrix-js-sdk/lib/matrix' {
     setRawDisplayName(name: string): void;
   }
 
-  export type EventType = never
-                        |'m.room.canonical_alias'
-                        |'m.room.encryption'
-                        |'m.room.guest_access'
-                        |'m.room.history_visibility'
-                        |'m.room.join_rules'
-                        |'m.room.member'
-                        |'m.room.message'
-                        |'m.room.name'
-                        |'m.room.power_levels'
-                        |'m.room.redaction'
-                        |'m.room.tombstone'
-                        |'m.room.topic'
-                        |'m.sticker'
-                        |'m.presence';
+  export type EventType = string;
 
   export type MsgType = never
                       |'m.audio'

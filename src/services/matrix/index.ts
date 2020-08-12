@@ -16,6 +16,7 @@ import {
 
 import * as AccountsService from '../accounts'
 import { GeneratorListener } from '../../generatorlistener'
+import { OptionalSerializable } from '../../storage'
 
 const accountCredentialSchema = {
   type: 'object',
@@ -114,16 +115,58 @@ interface Remote {
   v0: RemoteV0
 }
 
+type AccountDataType = { [k: string]: OptionalSerializable }
+type AccountDataEntry = undefined | AccountDataType
+
 class MatrixInstance {
   client: mx.MatrixClient | undefined
+  /**
+   * List of user's rooms
+   */
   readonly room_list = new GeneratorListener<mx.Room[]>([])
+  /**
+   * User account data
+   */
+  readonly user_ad: {
+    [type: string]: GeneratorListener<AccountDataEntry>
+  } = {}
 
   get active(): boolean {
     return Boolean(this.client)
   }
 
+  getAdGenerator(type: string): GeneratorListener<AccountDataEntry> {
+    if (!this.user_ad[type]) {
+      this.user_ad[type] = new GeneratorListener(undefined)
+    }
+    return this.user_ad[type]
+  }
+
+  _setupRoomList(): void {
+    if (!this.client) {
+      throw new TypeError('Client undefined')
+    }
+    const updateRooms = (): void => {
+      this.room_list.value = (this.client as mx.MatrixClient).getRooms()
+    }
+    this.client.on('Room', updateRooms)
+    this.client.on('Room.name', updateRooms)
+    this.client.on('RoomState.events', updateRooms)
+    this.client.on('deleteRoom', updateRooms)
+  }
+  _setupAccountData(): void {
+    if (!this.client) {
+      throw new TypeError('Client undefined')
+    }
+    this.client.on('accountData', (event: mx.MatrixEvent) => {
+      this.getAdGenerator(event.getType()).value = event.event.content
+    })
+  }
   createClient(opts: mx.CreateClientOption): mx.MatrixClient {
-    return (this.client = mx.createClient(opts))
+    this.client = mx.createClient(opts)
+    this._setupRoomList()
+    this._setupAccountData()
+    return this.client
   }
   stopClient(): void {
     if (this.client) {
@@ -325,15 +368,6 @@ class ServiceClass implements Service {
       }
     })
 
-    // ROOM LIST SETUP --------------------------------------------------------
-    const updateRooms = (): void => {
-      instance.room_list.value = client.getRooms()
-    }
-    client.on('Room', updateRooms)
-    client.on('Room.name', updateRooms)
-    client.on('RoomState.events', updateRooms)
-    client.on('deleteRoom', updateRooms)
-
     await client.startClient({
       initialSyncLimit: 10,
       lazyLoadMembers: true
@@ -467,6 +501,37 @@ class ServiceClass implements Service {
         type: getType(r) || undefined
       }))
     }
+  }
+
+  @rpc.RpcAddress(['v0', undefined, 'account_data', undefined, 'set'])
+  @rpc.RemapArguments(['drop', 'expand', 'expand'])
+  @rpc.EnforceMethodArgSchema({
+    type: 'array',
+    items: [{ type: 'string' }, { type: 'string' }],
+    minItems: 3
+  })
+  async sendAccountData(
+    id: string,
+    type: string,
+    data: AccountDataType
+  ): Promise<void> {
+    const { client } = this.getInstance(id)
+    if (!client) {
+      throw new TypeError('Client not set up')
+    }
+    client.setAccountData(type, data)
+  }
+  @rpc.RpcAddress(['v0', undefined, 'account_data', undefined, 'listen'])
+  @rpc.RemapArguments(['drop', 'expand', 'expand'])
+  @rpc.EnforceMethodArgSchema({
+    type: 'array',
+    items: [{ type: 'string' }, { type: 'string' }]
+  })
+  listenAccountData(
+    id: string,
+    type: string
+  ): AsyncGenerator<AccountDataEntry, void, void> {
+    return this.getInstance(id).getAdGenerator(type).generate()
   }
 }
 
