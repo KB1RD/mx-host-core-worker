@@ -6,6 +6,7 @@
 import * as rpc from 'rpcchannel'
 import Ajv from 'ajv'
 import * as loglvl from 'loglevel'
+import * as request from 'request'
 
 import {
   ServiceConstructor,
@@ -21,7 +22,16 @@ import AccountsService from './services/accounts'
 import * as AccountsServiceExports from './services/accounts'
 import MatrixService from './services/matrix'
 import * as MatrixServiceExports from './services/matrix'
+import AppsService from './services/apps'
+import * as AppsServiceExports from './services/apps'
+
 import { KvStorageBackend, KvBackendCache } from './storage'
+
+type RequestFunc = request.RequestAPI<
+  request.Request,
+  request.CoreOptions,
+  request.RequiredUriUrl
+>
 
 const addrToString = (addr: rpc.MultistringAddress) =>
   addr
@@ -85,7 +95,7 @@ class MainWorker implements BaseWorker {
   protected readonly createLog: (name: string) => loglvl.Logger
 
   readonly storage_backend: KvStorageBackend
-  readonly request: Request
+  readonly request: RequestFunc
 
   readonly validateMsg: Ajv.ValidateFunction
 
@@ -96,7 +106,7 @@ class MainWorker implements BaseWorker {
   }: {
     createLog: (name: string) => loglvl.Logger
     storage_backend: KvStorageBackend
-    request: Request
+    request: RequestFunc
   }) {
     this.request = request
     this.createLog = createLog
@@ -120,6 +130,7 @@ class MainWorker implements BaseWorker {
     this.registry.registerAll(this as {})
     this.registerService(AccountsService)
     this.registerService(MatrixService)
+    this.registerService(AppsService)
     this.log.debug('Done registering services')
 
     this.log.info('Done starting worker core')
@@ -351,6 +362,7 @@ interface Remote {
       services: ServicesRemote
       accounts: AccountsServiceExports.Remote
       mxbindings: MatrixServiceExports.Remote
+      apps: AppsServiceExports.Remote
     }
   }
 }
