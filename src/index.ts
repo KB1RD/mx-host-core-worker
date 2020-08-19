@@ -136,14 +136,14 @@ class MainWorker implements BaseWorker {
     this.log.info('Done starting worker core')
   }
 
-  onconnect(port: MessagePort): void {
+  getRpcChannel(port: MessagePort, policy?: rpc.AccessPolicy): rpc.RpcChannel {
     const chan = new rpc.RpcChannel(
       (msg, xfer) => {
         port.postMessage(msg, xfer)
         this.log.debug(`Sent message to handler ${addrToString(msg.to)}`)
       },
       // Contexts that can directly connect are trusted
-      rpc.AccessPolicy.ALLOW,
+      policy,
       this.registry
     )
     port.onmessage = (event: MessageEvent): void => {
@@ -159,6 +159,11 @@ class MainWorker implements BaseWorker {
       chan.receive(msg)
     }
     this.channels.add(chan)
+    return chan
+  }
+  onconnect(port: MessagePort): void {
+    // Contexts that can directly connect are trusted
+    this.getRpcChannel(port, rpc.AccessPolicy.ALLOW)
   }
   onmessage(e: MessageEvent): void {
     if (e.data instanceof MessagePort) {

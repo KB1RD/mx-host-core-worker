@@ -16,6 +16,7 @@ import {
   prefixServiceRpc
 } from '../service'
 
+import * as Permissions from './permissions'
 import Manifest from './manifest'
 
 class App {
@@ -53,7 +54,7 @@ class App {
     return this.cached_manifest.version
   }
 
-  copyTo(other: App) {
+  copyTo(other: App): void {
     other.permissions.value = this.permissions.value.slice()
   }
 
@@ -92,6 +93,12 @@ interface AppDetails {
   description?: string
 }
 
+interface ManifestResponse {
+  manifest: Manifest.Known
+  known_permissions: { [key: string]: { inherits: string[] } }
+  unknown_permissions: string[]
+}
+
 interface RemoteV0 {
   placeholder: string
 }
@@ -102,6 +109,7 @@ interface Remote {
 
 class ServiceClass implements Service {
   readonly validateManifest: ValidateFunction
+  readonly validateAppConfig: ValidateFunction
   readonly known_apps: { [account: string]: MapGeneratorListener<App> } = {}
   readonly associations: {
     [account: string]: MapGeneratorListener<Association>
@@ -112,6 +120,7 @@ class ServiceClass implements Service {
     protected readonly log: loglvl.Logger
   ) {
     this.validateManifest = parent.ajv.compile(Manifest.Known.Schema)
+    this.validateAppConfig = parent.ajv.compile(App.Schema)
   }
 
   getAccount(id: string): MapGeneratorListener<App> {
@@ -127,9 +136,13 @@ class ServiceClass implements Service {
     return this.associations[id]
   }
 
+  pushApp(id: string, app: App): void {
+    this.getAccount(id).value[app.manifest_url] = app
+  }
+
   @rpc.RpcAddress(['v0', 'app', undefined, 'fetchAndVerifyManifest'])
   @rpc.RemapArguments(['drop', 'expand'])
-  fetchAndVerifyManifest(url: string): Promise<Manifest.Known> {
+  fetchAndVerifyManifest(url: string): Promise<ManifestResponse> {
     return new Promise((resolve, reject) => {
       this.parent.request(
         { method: 'GET', uri: url, timeout: 5000 },
@@ -147,7 +160,26 @@ class ServiceClass implements Service {
                 this.validateManifest.errors.length = 0
                 throw error
               }
-              resolve(object as Manifest.Known)
+
+              const resp: ManifestResponse = {
+                manifest: object as Manifest.Known,
+                known_permissions: {},
+                unknown_permissions: []
+              }
+
+              // Ensure that all permissions are identified
+              const resolvePermission = (name: string) => {
+                const data = Permissions.default[name]
+                if (!data) {
+                  resp.unknown_permissions.push(name)
+                } else if (!resp.known_permissions[name]) {
+                  resp.known_permissions[name] = { inherits: data.inherits }
+                  data.inherits.forEach(resolvePermission)
+                }
+              }
+              resp.manifest.request_permissions.forEach(resolvePermission)
+
+              resolve(resp)
             } catch (e) {
               reject(e)
             }
@@ -179,12 +211,14 @@ class ServiceClass implements Service {
     account.value[url] = app
   }
 
+  @rpc.RpcAddress(['v0', undefined, 'userapp', 'listen'])
+  @rpc.RemapArguments(['drop', 'expand'])
+  listenApps(ac_id: string): AsyncGenerator<string[], void, void> {
+    return this.getAccount(ac_id).generateKeys()
+  }
+
   @rpc.RpcAddress(['v0', undefined, 'userapp', undefined, 'listen'])
   @rpc.RemapArguments(['drop', 'expand', 'expand'])
-  @rpc.EnforceMethodArgSchema({
-    type: 'array',
-    items: [{ type: 'string' }, { type: 'string' }]
-  })
   async *listenAppDetails(
     ac_id: string,
     url: string
@@ -237,10 +271,6 @@ class ServiceClass implements Service {
   }
   @rpc.RpcAddress(['v0', undefined, 'userapp', undefined, 'perms', 'listen'])
   @rpc.RemapArguments(['drop', 'expand', 'expand'])
-  @rpc.EnforceMethodArgSchema({
-    type: 'array',
-    items: [{ type: 'string' }, { type: 'string' }]
-  })
   async *listenPermissions(
     ac_id: string,
     url: string
@@ -284,10 +314,6 @@ class ServiceClass implements Service {
   }
   @rpc.RpcAddress(['v0', undefined, 'assoc', undefined, 'listen'])
   @rpc.RemapArguments(['drop', 'expand', 'expand'])
-  @rpc.EnforceMethodArgSchema({
-    type: 'array',
-    items: [{ type: 'string' }, { type: 'string' }]
-  })
   listenAssociation(
     ac_id: string,
     id: string
@@ -299,10 +325,6 @@ class ServiceClass implements Service {
   }
   @rpc.RpcAddress(['v0', undefined, 'assoc', 'listen'])
   @rpc.RemapArguments(['drop', 'expand'])
-  @rpc.EnforceMethodArgSchema({
-    type: 'array',
-    items: [{ type: 'string' }, { type: 'string' }]
-  })
   async *listenAssociations(
     ac_id: string
   ): AsyncGenerator<[string, Association][], void, void> {
@@ -314,6 +336,61 @@ class ServiceClass implements Service {
       yield keys.map((key) => [key, assoc.value[key]])
     }
   }
+
+  @rpc.RpcAddress(['v0', undefined, 'userapp', undefined, 'entry', undefined])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand', 'pass'])
+  @rpc.EnforceMethodArgSchema({
+    type: 'array',
+    items: [
+      { type: 'string' },
+      { type: 'string' },
+      { type: 'string' },
+      Permissions.Context.Base.Schema
+    ]
+  })
+  setupEntryChannel(
+    account_id: string,
+    app_url: string,
+    entry: string,
+    provided_ctx: Permissions.Context.Base
+  ): { port: MessagePort; context: Permissions.Context } {
+    const app = this.getAccount(account_id).value[app_url]
+    if (!app) {
+      throw new TypeError('App has not been registered')
+    }
+    this.log.info(
+      `Entering app ${app_url} under account ${account_id} via point ${entry}`
+    )
+
+    const context = { account_id, app_url, ...provided_ctx }
+    const channel: MessageChannel = new MessageChannel()
+
+    // Apps are untrusted; Deny by default to RPC resources
+    const ch = this.parent.getRpcChannel(channel.port1, rpc.AccessPolicy.DENY)
+
+    // Keep track of permissions that have already been applied
+    const granted: Set<Permissions.Permission> = new Set()
+    const addPermission = (perm: string) => {
+      const perm_obj = Permissions.default[perm]
+      if (!perm_obj) {
+        this.log.warn(
+          `Permission ${perm} not known, but added to app ${app_url}`
+        )
+      } else if (!granted.has(perm_obj)) {
+        granted.add(perm_obj)
+        // TODO: Define behavior when two permissions directly conflict
+        perm_obj.inherits.forEach(addPermission)
+        try {
+          perm_obj.grantOn(ch.access, context)
+        } catch (e) {
+          this.log.warn(`Failed to grant permission ${perm}`, e)
+        }
+      }
+    }
+    app.permissions.value.forEach(addPermission)
+
+    return { port: channel.port2, context }
+  }
 }
 
 const AppsService: ServiceDescriptor = prefixServiceRpc({
@@ -323,4 +400,4 @@ const AppsService: ServiceDescriptor = prefixServiceRpc({
 })
 
 export default AppsService
-export { ServiceClass, Remote }
+export { ServiceClass, Remote, App }

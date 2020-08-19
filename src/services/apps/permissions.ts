@@ -1,14 +1,54 @@
-import { AddressMap, AccessPolicy } from "rpcchannel"
+import { AddressMap, AccessPolicy } from 'rpcchannel'
 
-type Permission = {
+export namespace Context {
+  export type Base = {
+    /**
+     * Account ID to grant access to
+     */
+    account_id?: string
+    /**
+     * Application being given access
+     */
+    app_url?: string
+    /**
+     * Room being given access to (if any)
+     */
+    room_id?: string
+
+    /**
+     * Namespaced contexts are allowed
+     */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    [key: string]: any
+  }
+  export namespace Base {
+    export const Schema = {
+      type: 'object',
+      properties: {
+        account_id: { type: 'string' },
+        app_id: { type: 'string' },
+        room_id: { type: 'string' }
+      }
+    }
+  }
+  export const Schema = {
+    ...Base.Schema,
+    required: ['account_id', 'app_id']
+  }
+}
+
+export interface Context extends Context.Base {
+  account_id: string
+  app_url: string
+}
+
+export type Permission = {
   /**
    * Grant this particular permission on an application.
    * @param map The permission map to apply changes to
-   * @param opts Contains:
-   * - `account` - The ID of the account to grant permissions on
-   * - `id` - The ID of the application being given the permission
+   * @param ctx Context to provide to the permission system
    */
-  grantOn(map: AddressMap<AccessPolicy>, opts: { account: string, id: string }): void
+  grantOn(map: AddressMap<AccessPolicy>, ctx: Context): void
   /**
    * Permissions that this permission inherits. When this permission is
    * granted, these permissions will be granted as well.
@@ -23,9 +63,13 @@ const mxbindings_permissions: PermissionTable = {
   /**
    * Permission to get room display information (name, avatar, aliases)
    */
-  ['net.kb1rd.mxbindings.room.displayinfo']: {
-    grantOn(map, { account, id }) {
-      // TODO
+  ['a.openroom.displayinfo']: {
+    grantOn(map, { room_id }) {
+      if (!room_id) {
+        throw new TypeError(
+          'Tried to grant room permissions in context without room'
+        )
+      }
     },
     inherits: []
   },
@@ -37,12 +81,18 @@ const mxbindings_permissions: PermissionTable = {
    * * m.room.third_party_invite
    * * m.room.server_acl
    */
-  ['net.kb1rd.mxbindings.room.getstate']: {
-    grantOn(map, { account }) {
-      const set = (policy: AccessPolicy, name?: string) => map.put(
-        [...mxb0_base, account, 'state', name, 'listen'],
-        policy
-      )
+  ['a.openroom.state.get']: {
+    grantOn(map, { account_id, room_id }) {
+      if (!room_id) {
+        throw new TypeError(
+          'Tried to grant room permissions in context without room'
+        )
+      }
+      const set = (policy: AccessPolicy, name?: string) =>
+        map.put(
+          [...mxb0_base, account_id, 'room', room_id, 'state', name, 'listen'],
+          policy
+        )
       set(AccessPolicy.ALLOW, undefined)
       set(AccessPolicy.DENY, 'm.room.member')
       set(AccessPolicy.DENY, 'm.room.power_levels')
@@ -62,12 +112,18 @@ const mxbindings_permissions: PermissionTable = {
    * * m.room.server_acl
    * * m.room.tombstone
    */
-  ['net.kb1rd.mxbindings.room.setstate']: {
-    grantOn(map, { account }) {
-      const set = (policy: AccessPolicy, name?: string) => map.put(
-        [...mxb0_base, account, 'state', name, 'set'],
-        policy
-      )
+  ['a.openroom.state.set']: {
+    grantOn(map, { account_id, room_id }) {
+      if (!room_id) {
+        throw new TypeError(
+          'Tried to grant room permissions in context without room'
+        )
+      }
+      const set = (policy: AccessPolicy, name?: string) =>
+        map.put(
+          [...mxb0_base, account_id, 'room', room_id, 'state', name, 'set'],
+          policy
+        )
       set(AccessPolicy.ALLOW, undefined)
       set(AccessPolicy.DENY, 'm.room.join_rules')
       set(AccessPolicy.DENY, 'm.room.member')
@@ -78,7 +134,7 @@ const mxbindings_permissions: PermissionTable = {
       set(AccessPolicy.DENY, 'm.room.server_acl')
       set(AccessPolicy.DENY, 'm.room.tombstone')
     },
-    inherits: ['net.kb1rd.mxbindings.room.getstate']
+    inherits: ['a.openroom.state.get']
   }
 }
 
