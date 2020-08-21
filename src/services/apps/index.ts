@@ -233,6 +233,22 @@ class ServiceClass implements Service {
     return this.getAccount(ac_id).generateKeys()
   }
 
+  @rpc.RpcAddress(['v0', undefined, 'userapp', undefined, 'manifest', 'listen'])
+  @rpc.RemapArguments(['drop', 'expand', 'expand'])
+  async *listenAppManifest(
+    ac_id: string,
+    url: string
+  ): AsyncGenerator<Manifest.Known | undefined, void, void> {
+    const account = this.getAccount(ac_id)
+    for await (const app of account.generate(url)) {
+      if (!app) {
+        yield undefined
+      } else {
+        yield app.cached_manifest
+      }
+    }
+  }
+
   @rpc.RpcAddress(['v0', undefined, 'userapp', undefined, 'listen'])
   @rpc.RemapArguments(['drop', 'expand', 'expand'])
   async *listenAppDetails(

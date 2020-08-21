@@ -129,12 +129,12 @@ describe('[apps v0] matrix/index.ts', () => {
       })
     })
   })
-  const addTestApp = async () => {
+  const addTestApp = async (entry_points = {}) => {
     await aapi['abc123'].userapp['https://example.com/app.json'].setup({
       manifest_version: 0,
       title: { en: 'Hello World App' },
       version: [0, 1, 0],
-      entry_points: {},
+      entry_points,
       request_permissions: []
     })
   }
@@ -154,6 +154,21 @@ describe('[apps v0] matrix/index.ts', () => {
       expect((await apps.next()).value).to.be.deep.equal([
         'https://example.com/app.json'
       ])
+    })
+    it('manifest responds to changes', async () => {
+      const apps = generate(
+        'abc123', 'userapp', 'https://example.com/app.json',
+        'manifest', 'listen'
+      )
+      expect((await apps.next()).value).to.be.equal(undefined)
+      await addTestApp()
+      expect((await apps.next()).value).to.be.deep.equal({
+        manifest_version: 0,
+        title: { en: 'Hello World App' },
+        version: [0, 1, 0],
+        entry_points: {},
+        request_permissions: []
+      })
     })
     describe('app details', () => {
       it('app details responds to new app additions', async () => {
