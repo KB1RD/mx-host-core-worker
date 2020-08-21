@@ -130,7 +130,7 @@ class ServiceClass implements Service {
     return this.known_apps[id]
   }
   getAssocTable(id: string): MapGeneratorListener<Association> {
-    if (this.associations[id]) {
+    if (!this.associations[id]) {
       this.associations[id] = new MapGeneratorListener()
     }
     return this.associations[id]
@@ -252,20 +252,19 @@ class ServiceClass implements Service {
     url: string,
     permissions: { [key: string]: boolean }
   ): void {
-    if (!this.known_apps[ac_id]) {
-      throw new TypeError('Account is not set up')
-    }
-    if (!this.known_apps[ac_id].value[url]) {
+    if (!this.getAccount(ac_id).value[url]) {
       throw new TypeError('App not registered on account')
     }
     const app = this.known_apps[ac_id].value[url]
     Object.keys(permissions).forEach((perm) => {
-      if (perm) {
+      if (permissions[perm]) {
         if (!app.permissions.value.includes(perm)) {
           app.permissions.value.push(perm)
         }
+        app.permissions.pushUpdate()
       } else if (app.permissions.value.includes(perm)) {
         app.permissions.value.splice(app.permissions.value.indexOf(perm), 1)
+        app.permissions.pushUpdate()
       }
     })
   }
@@ -275,21 +274,25 @@ class ServiceClass implements Service {
     ac_id: string,
     url: string
   ): AsyncGenerator<string[], void, void> {
-    if (!this.known_apps[ac_id]) {
-      throw new TypeError('Account is not set up')
-    }
+    const account = this.getAccount(ac_id)
     while (true) {
-      const account = this.known_apps[ac_id]
-      const perms = account && account.value[url].permissions
+      const perms = account.value[url]?.permissions
+
+      // Get the new promises before yielding so that it's impossible for
+      // additional events to sneak in the queue before we've gotten the next
+      // promise
+      const accountgen = account.generate(url)
+      const permgen = perms && perms.generate()
+      // Flush out the initial value so we're not constantly looping
+      accountgen.next()
+      perms && permgen.next()
+
       if (perms) {
         yield perms.value
       } else {
         yield []
       }
-      await Promise.race([
-        account.generate(url).next(),
-        perms.generate().next()
-      ])
+      await Promise.race([accountgen.next(), permgen.next()])
     }
   }
 
@@ -302,9 +305,6 @@ class ServiceClass implements Service {
     maxItems: 3
   })
   setAssociation(ac_id: string, id: string, to: string | undefined): void {
-    if (!this.known_apps[ac_id]) {
-      throw new TypeError('Account is not set up')
-    }
     const assoc = this.getAssocTable(ac_id)
     if (to) {
       assoc.value[id] = { to }
@@ -318,23 +318,14 @@ class ServiceClass implements Service {
     ac_id: string,
     id: string
   ): AsyncGenerator<Association | undefined, void, void> {
-    if (!this.known_apps[ac_id]) {
-      throw new TypeError('Account is not set up')
-    }
     return this.getAssocTable(ac_id).generate(id)
   }
   @rpc.RpcAddress(['v0', undefined, 'assoc', 'listen'])
   @rpc.RemapArguments(['drop', 'expand'])
-  async *listenAssociations(
+  listenAssociations(
     ac_id: string
-  ): AsyncGenerator<[string, Association][], void, void> {
-    if (!this.known_apps[ac_id]) {
-      throw new TypeError('Account is not set up')
-    }
-    const assoc = this.getAssocTable(ac_id)
-    for await (const keys of assoc.generateKeys()) {
-      yield keys.map((key) => [key, assoc.value[key]])
-    }
+  ): AsyncGenerator<{ [key: string]: Association }, void, void> {
+    return this.getAssocTable(ac_id).generateMap()
   }
 
   @rpc.RpcAddress(['v0', undefined, 'userapp', undefined, 'entry', undefined])

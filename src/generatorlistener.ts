@@ -27,19 +27,22 @@ class GeneratorListener<T> {
 }
 
 class MapGeneratorListener<V> {
-  protected readonly map: { [key: string]: V } = {}
+  readonly map: { [key: string]: V } = {}
   protected readonly callbacks = new Set<() => void>()
-  protected readonly map_callbacks: { [key: string]: Set<() => void> } = {}
+  protected readonly key_callbacks: { [key: string]: Set<() => void> } = {}
+  protected readonly map_callbacks = new Set<() => void>()
 
   pushKeyUpdate(): void {
     this.callbacks.forEach((c) => c())
     this.callbacks.clear()
   }
   pushUpdate(key: string): void {
-    if (this.map_callbacks[key]) {
-      this.map_callbacks[key].forEach((c) => c())
-      delete this.map_callbacks[key]
+    if (this.key_callbacks[key]) {
+      this.key_callbacks[key].forEach((c) => c())
+      delete this.key_callbacks[key]
     }
+    this.map_callbacks.forEach((c) => c())
+    this.map_callbacks.clear()
   }
   async *generateKeys(): AsyncGenerator<string[], void, void> {
     let promise: Promise<void>
@@ -49,13 +52,21 @@ class MapGeneratorListener<V> {
       await promise
     }
   }
+  async *generateMap(): AsyncGenerator<{ [key: string]: V }, void, void> {
+    let promise: Promise<void>
+    while (true) {
+      promise = new Promise((r) => this.map_callbacks.add(() => r()))
+      yield this.value
+      await promise
+    }
+  }
   async *generate(k: string): AsyncGenerator<V | undefined, void, void> {
     let promise: Promise<void>
     while (true) {
-      if (!this.map_callbacks[k]) {
-        this.map_callbacks[k] = new Set()
+      if (!this.key_callbacks[k]) {
+        this.key_callbacks[k] = new Set()
       }
-      promise = new Promise((r) => this.map_callbacks[k].add(() => r()))
+      promise = new Promise((r) => this.key_callbacks[k].add(() => r()))
       yield this.map[k]
       await promise
     }
@@ -64,7 +75,13 @@ class MapGeneratorListener<V> {
   get value(): { [key: string]: V } {
     // eslint-disable-next-line
     const self = this
-    return new Proxy({} as { [key: string]: V }, {
+    return new Proxy(self.map, {
+      ownKeys(): string[] {
+        return Object.keys(self.map)
+      },
+      has(target: { [key: string]: V }, key: string): boolean {
+        return key in self.map
+      },
       get(target: { [key: string]: V }, key: string): V | undefined {
         return self.map[key]
       },
