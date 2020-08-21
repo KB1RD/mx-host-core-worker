@@ -1,7 +1,8 @@
 import * as rpc from 'rpcchannel'
 import * as loglvl from 'loglevel'
 import * as mx from 'matrix-js-sdk/lib/matrix'
-import { ValidationError } from 'ajv'
+import { ValidationError, ValidateFunction } from 'ajv'
+import { sha256 } from 'js-sha256'
 
 import EventTypes from './eventtypes'
 
@@ -15,8 +16,15 @@ import {
 } from '../service'
 
 import * as AccountsService from '../accounts'
-import { GeneratorListener } from '../../generatorlistener'
+import * as AppsService from '../apps'
+import {
+  GeneratorListener,
+  MapGeneratorListener
+} from '../../generatorlistener'
 import { OptionalSerializable } from '../../storage'
+import { Serializable } from 'child_process'
+import { App, AppDetails } from '../apps'
+import { onGenerate } from '../../utils'
 
 const accountCredentialSchema = {
   type: 'object',
@@ -118,6 +126,11 @@ interface Remote {
 type AccountDataType = { [k: string]: OptionalSerializable }
 type AccountDataEntry = undefined | AccountDataType
 
+interface AppGenSet {
+  detailgen: AsyncGenerator<AppDetails | undefined, void, void>
+  permgen: AsyncGenerator<string[], void, void>
+}
+
 class MatrixInstance {
   client: mx.MatrixClient | undefined
   /**
@@ -127,19 +140,53 @@ class MatrixInstance {
   /**
    * User account data
    */
-  readonly user_ad: {
-    [type: string]: GeneratorListener<AccountDataEntry>
-  } = {}
+  readonly user_ad = new MapGeneratorListener<AccountDataEntry>()
+
+  protected app_list_gen?: AsyncGenerator<string[], void, void>
+  protected readonly app_gens: { [key: string]: AppGenSet } = {}
+
+  constructor(
+    public readonly parent: ServiceClass,
+    public readonly account_id: string
+  ) {}
 
   get active(): boolean {
     return Boolean(this.client)
   }
 
-  getAdGenerator(type: string): GeneratorListener<AccountDataEntry> {
-    if (!this.user_ad[type]) {
-      this.user_ad[type] = new GeneratorListener(undefined)
+  getAdGenerator(type: string): AsyncGenerator<AccountDataEntry, void, void> {
+    return this.user_ad.generate(type)
+  }
+
+  _processAppConfig(id: string, obj: Serializable): void {
+    try {
+      this.parent.validateAppConfig(obj)
+      if (this.parent.validateAppConfig.errors?.length) {
+        const error = new ValidationError([
+          ...this.parent.validateAppConfig.errors
+        ])
+        this.parent.validateAppConfig.errors.length = 0
+        throw error
+      }
+    } catch (e) {
+      this.parent.log.warn(`Error processing app config ${e}`)
+      return
     }
-    return this.user_ad[type]
+
+    const config = obj as App.JSON
+    const hash = sha256(config.manifest_url)
+    if (id !== hash.toLowerCase()) {
+      this.parent.log.warn('App ID had invalid hash for manifest URL')
+      return
+    }
+
+    const app = new App(config.manifest_url, config.cached_manifest)
+    app.permissions.value = [...config.permissions]
+    this.parent.log.info(
+      `Matrix updated app ${config.manifest_url} on account ${this.account_id}`
+    )
+    // this.parent.log.info('APP', JSON.stringify(app))
+    this.parent.apps_svc.pushApp(this.account_id, app)
   }
 
   _setupRoomList(): void {
@@ -154,13 +201,72 @@ class MatrixInstance {
     this.client.on('RoomState.events', updateRooms)
     this.client.on('deleteRoom', updateRooms)
   }
+  onAppUpdate(url: string, doUndef: boolean): void {
+    if (!this.client) {
+      return
+    }
+    const app = this.parent.apps_svc.getAccount(this.account_id).value[url]
+    if (!app && !doUndef) {
+      return
+    }
+    this.client.setAccountData(
+      `net.kb1rd.app.v0.${sha256(url).toLowerCase()}`,
+      app ? app.toJSON() : {}
+    )
+    this.parent.log.info(
+      `Updated account data for app ${url} on account ${this.account_id}`
+    )
+  }
+  _setupAppAdUpdater(): void {
+    this.app_list_gen = this.parent.apps_svc.listenApps(this.account_id)
+    onGenerate(this.app_list_gen, (apps: string[]) => {
+      Object.keys(this.app_gens).forEach((old: string) => {
+        if (!apps.includes(old)) {
+          this.app_gens[old].detailgen.return()
+          this.app_gens[old].permgen.return()
+          delete this.app_gens[old]
+          this.onAppUpdate(old, true)
+        }
+      })
+      apps.forEach((app) => {
+        if (!this.app_gens[app]) {
+          this.app_gens[app] = {
+            detailgen: this.parent.apps_svc.listenAppDetails(
+              this.account_id,
+              app
+            ),
+            permgen: this.parent.apps_svc.listenPermissions(
+              this.account_id,
+              app
+            )
+          }
+          onGenerate(this.app_gens[app].detailgen, () =>
+            this.onAppUpdate(app, false)
+          )
+          onGenerate(this.app_gens[app].permgen, () =>
+            this.onAppUpdate(app, false)
+          )
+        }
+      })
+    })
+  }
   _setupAccountData(): void {
     if (!this.client) {
       throw new TypeError('Client undefined')
     }
     this.client.on('accountData', (event: mx.MatrixEvent) => {
-      this.getAdGenerator(event.getType()).value = event.event.content
+      const type = event.getType()
+      this.user_ad.value[type] = event.event.content
+
+      // Process app AD
+      /* if (type.startsWith('net.kb1rd.app.v0.')) {
+        this._processAppConfig(type.substr(17), event.event.content)
+      } */
     })
+
+    // This is blocked on getting a reasonable way in the Matrix JS SDK to tell
+    // if an event is a local echo
+    // this._setupAppAdUpdater()
   }
   createClient(opts: mx.CreateClientOption): mx.MatrixClient {
     this.client = mx.createClient(opts)
@@ -174,11 +280,21 @@ class MatrixInstance {
       delete this.client
       this.room_list.value = []
     }
+
+    if (this.app_list_gen) {
+      this.app_list_gen.return()
+    }
+    Object.keys(this.app_gens).forEach((k) => {
+      this.app_gens[k].detailgen.return()
+      this.app_gens[k].permgen.return()
+      delete this.app_gens[k]
+    })
   }
 }
 
 class ServiceClass implements Service {
   protected readonly account_svc: AccountsService.ServiceClass
+  readonly apps_svc: AppsService.ServiceClass
 
   protected readonly state_listeners: {
     [uid: string]: GeneratorListener<AccountState>
@@ -186,25 +302,32 @@ class ServiceClass implements Service {
 
   protected readonly instances: { [uid: string]: MatrixInstance } = {}
 
+  readonly validateAppConfig: ValidateFunction
+
   constructor(
     protected readonly parent: MainWorker,
-    protected readonly log: loglvl.Logger
+    readonly log: loglvl.Logger
   ) {
     this.account_svc = parent.getServiceDependency(
       ['net', 'kb1rd', 'accounts'],
       [0, 1]
     ) as AccountsService.ServiceClass
+    this.apps_svc = parent.getServiceDependency(
+      ['net', 'kb1rd', 'apps'],
+      [0, 1]
+    ) as AppsService.ServiceClass
     mx.request(parent.request)
     log.warn(
       'Note: The Matrix service changed the global request function used by ' +
         'the JS SDK. This is because the SDK does not support custom ' +
         'request functions for .well-known resolution.'
     )
+    this.validateAppConfig = this.apps_svc.validateAppConfig
   }
 
   getInstance(uid: string): MatrixInstance {
     if (!this.instances[uid]) {
-      this.instances[uid] = new MatrixInstance()
+      this.instances[uid] = new MatrixInstance(this, uid)
     }
     return this.instances[uid]
   }
@@ -519,7 +642,12 @@ class ServiceClass implements Service {
     if (!client) {
       throw new TypeError('Client not set up')
     }
-    client.setAccountData(type, data)
+    await client.setAccountData(type, data)
+  }
+  @rpc.RpcAddress(['v0', undefined, 'account_data', 'listen'])
+  @rpc.RemapArguments(['drop', 'expand'])
+  listenAccountDataKeys(id: string): AsyncGenerator<string[], void, void> {
+    return this.getInstance(id).user_ad.generateKeys()
   }
   @rpc.RpcAddress(['v0', undefined, 'account_data', undefined, 'listen'])
   @rpc.RemapArguments(['drop', 'expand', 'expand'])
@@ -531,7 +659,7 @@ class ServiceClass implements Service {
     id: string,
     type: string
   ): AsyncGenerator<AccountDataEntry, void, void> {
-    return this.getInstance(id).getAdGenerator(type).generate()
+    return this.getInstance(id).getAdGenerator(type)
   }
 }
 

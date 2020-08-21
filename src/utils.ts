@@ -16,4 +16,14 @@ function generateUniqueKey(
   return key
 }
 
-export { generateUniqueKey }
+async function onGenerate<T>(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  gen: AsyncGenerator<T, any, any>,
+  func: (arg: T) => void
+): Promise<void> {
+  for await (const t of gen) {
+    func(t)
+  }
+}
+
+export { onGenerate, generateUniqueKey }

@@ -83,7 +83,8 @@ namespace App {
       permissions: { type: 'array', items: { type: 'string' } },
       manifest_url: { type: 'string' },
       cached_manifest: Manifest.Known.Schema
-    }
+    },
+    required: ['permissions', 'manifest_url', 'cached_manifest']
   }
 }
 
@@ -445,4 +446,4 @@ const AppsService: ServiceDescriptor = prefixServiceRpc({
 })
 
 export default AppsService
-export { ServiceClass, Remote, App }
+export { ServiceClass, Remote, App, AppDetails }

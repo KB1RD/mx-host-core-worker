@@ -34,7 +34,7 @@ describe('[matrix v0] matrix/index.ts', () => {
     }
 
     await rpc.call_obj.net.kb1rd.services.requestServices(
-      { id: ['net', 'kb1rd', 'mxbindings'], versions: [[0, 1]]}
+      { id: ['net', 'kb1rd', 'mxbindings'], versions: [[0, 2]]}
     )
 
     oldlog = console.log
@@ -295,9 +295,9 @@ describe('[matrix v0] matrix/index.ts', () => {
 
   describe('listenUserState', () => {
     it('throws error if account does not exist', async function () {
-      expectAsyncThrow(
+      await expectAsyncThrow(
         aapi['dfsdf'].listenUserState(),
-        'Account does not exist'
+        `Account 'dfsdf' does not exist`
       )
     })
     it('defaults to UNAUTHENTICATED if not in storage', async function () {
@@ -587,10 +587,11 @@ describe('[matrix v0] matrix/index.ts', () => {
           expect(opts.body).to.be.equal('{"hello":"world"}')
         })
         .respond(200)
-      await mxbindings.v0[id].account_data['net.kb1rd.test'].set({
+      const promise = mxbindings.v0[id].account_data['net.kb1rd.test'].set({
         hello: "world"
       })
       await http.flushAllExpected()
+      await promise
     }))
     it('listen', basicClientTest(async (id) => {
       const sync_response = {
@@ -607,4 +608,32 @@ describe('[matrix v0] matrix/index.ts', () => {
         .to.be.deep.equal({ hello: 'world' })
     }))
   })
+
+  /* describe('App account data', () => {
+    it('loads apps from AD', basicClientTest(async () => {
+      const hash = '981DD5D40C77FE1A34247F5A2D0F359855B4B2E6AD8C670C2241390E6F4A5818'.toLowerCase()
+      const content = {
+        permissions: ['net.kb1rd.test'],
+        manifest_url: 'https://url',
+        cached_manifest: {
+          manifest_version: 0,
+          title: { en: 'Test App!' },
+          version: [0, 1, 0],
+          entry_points: {},
+          request_permissions: []
+        }
+      }
+      const sync_response = {
+        next_batch: 'batch_token',
+        rooms: { join: {}, invite: {}, leave: {} },
+        presence: {},
+        account_data: {
+          events: [{ type: `net.kb1rd.app.v0.${hash}`, content }]
+        }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+      // TODO
+    }))
+  }) */
 })
