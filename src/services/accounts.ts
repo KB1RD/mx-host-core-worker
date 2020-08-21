@@ -2,6 +2,8 @@ import * as rpc from 'rpcchannel'
 import * as loglvl from 'loglevel'
 import * as Ajv from 'ajv'
 
+import * as utils from '../utils'
+
 import { GeneratorListener } from '../generatorlistener'
 
 import MainWorker from '../index'
@@ -124,17 +126,7 @@ class ServiceClass implements Service {
     // Even though its random, this should still be loaded to prevent potential
     // name collisions with shorter account UIDs
     await this.lazyLoadAccounts()
-    let key: string
-    do {
-      key = ''
-      // Create a random unsigned 128 bit uint encoded as base16
-      // (16 groups of 2 chars, 4 bits per char)
-      for (let i = 0; i < 16; i++) {
-        key += Math.floor(Math.random() * 255)
-          .toString(16)
-          .padStart(2, '0')
-      }
-    } while (this.map.value[key])
+    const key = utils.generateUniqueKey(16, (k) => Boolean(this.map.value[k]))
     this.map.value[key] = new Account(key, this)
     this.map.pushUpdate()
     await this.saveAccountList()

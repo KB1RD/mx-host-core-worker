@@ -61,6 +61,19 @@ type PermissionTable = { [id: string]: Permission }
 const mxb0_base = ['net', 'kb1rd', 'mxbindings', 'v0']
 const mxbindings_permissions: PermissionTable = {
   /**
+   * A default permission to request services
+   */
+  ['a.services.request']: {
+    grantOn(map) {
+      map.put(
+        ['net', 'kb1rd', 'services', 'requestServices'],
+        AccessPolicy.ALLOW
+      )
+    },
+    inherits: []
+  },
+
+  /**
    * Permission to get room display information (name, avatar, aliases)
    */
   ['a.openroom.displayinfo']: {

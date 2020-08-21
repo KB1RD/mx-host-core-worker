@@ -45,6 +45,10 @@ describe('[apps v0] matrix/index.ts', () => {
     shutdown = () => {
       channel.port1.close()
       channel.port2.close()
+      for (const [port] of worker.channels.entries()) {
+        port.close()
+        worker.channels.clear()
+      }
     }
   })
   afterEach(function () {
@@ -391,6 +395,38 @@ describe('[apps v0] matrix/index.ts', () => {
       expect((await gen.next()).value).to.be.deep.equal({
         ['net.kb1rd.plaintext']: { to: 'https://url2' }
       })
+    })
+  })
+
+  describe('setupEntryChannel/redeemEntryToken', () => {
+    // There isn't really much I *can* test here
+    // TODO: Figure out how to actually test this properly
+    it('fails if app not registered', async () => {
+      await expectAsyncThrow(
+        aapi['abc123']
+          .userapp['https://url']
+          .entry['net.kb1rd.openroom']
+          .setup({ room: '!abc123:example.com' }),
+        'App has not been registered'
+      )
+    })
+    it('redeems a channel with context info', async () => {
+      await addTestApp()
+      const opts = await aapi['abc123']
+        .userapp['https://example.com/app.json']
+        .entry['net.kb1rd.openroom']
+        .setup({ room_id: '!abc123:example.com' })
+      expect(typeof opts.token).to.be.equal('string')
+      expect(typeof opts.timeout).to.be.equal('number')
+      const data = await aapi.redeemToken[opts.token]()
+      expect(data).to.not.be.undefined
+      expect(data.port).to.be.an.instanceOf(MessagePort)
+      expect(data.context).to.be.deep.equal({
+        account_id: 'abc123',
+        app_url: 'https://example.com/app.json',
+        room_id: '!abc123:example.com'
+      })
+      data.port.close()
     })
   })
 })

@@ -86,7 +86,7 @@ class MainWorker implements BaseWorker {
    * Set of active RPC channels
    * @todo Deallocate channels. **This is a memory leak**
    */
-  protected readonly channels = new Set<rpc.RpcChannel>()
+  protected readonly channels = new Map<MessagePort, rpc.RpcChannel>()
 
   readonly services = new Set<ServiceDescriptor>()
   readonly services_active = new Set<ServiceVersionDescriptor>()
@@ -158,12 +158,16 @@ class MainWorker implements BaseWorker {
       this.log.debug(`Received message to handler ${addrToString(msg.to)}`)
       chan.receive(msg)
     }
-    this.channels.add(chan)
+    this.channels.set(port, chan)
     return chan
   }
   onconnect(port: MessagePort): void {
     // Contexts that can directly connect are trusted
     this.getRpcChannel(port, rpc.AccessPolicy.ALLOW)
+  }
+  ondisconnect(port: MessagePort): void {
+    port.close()
+    this.channels.delete(port)
   }
   onmessage(e: MessageEvent): void {
     if (e.data instanceof MessagePort) {

@@ -86,10 +86,6 @@ namespace AppManifest {
          * opened in a new tab. The substitutions are as follows:
          * * `{{return}}` - The URL to `iframe` to establish a communication
          * channel with the worker
-         * * `{{account}}` - The account to use during connection setup
-         * * `{{token}}` - The one-time token for this context
-         * Substitutions are performed using a basic replace and are encoded as
-         * URI components.
          */
         to: string
       }

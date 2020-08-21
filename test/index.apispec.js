@@ -29,9 +29,8 @@ describe('[CORE] index.ts', () => {
     })
     it('sets up rpc channel with registry', function () {
       worker.onconnect(channel.port1)
-      const channels = [...worker.channels]
-      expect(channels.length).to.be.equal(1)
-      expect(channels[0].reg).to.be.equal(worker.registry)
+      const channels = worker.channels
+      expect(channels.get(channel.port1).reg).to.be.equal(worker.registry)
       channel.port1.close()
       channel.port2.close()
     })
@@ -44,8 +43,7 @@ describe('[CORE] index.ts', () => {
 
       const data = 'sdfsdfdfsdfsdfdsfs'
 
-      const channels = [...worker.channels]
-      channels[0].send([], [data])
+      worker.channels.get(channel.port1).send([], [data])
       await new Promise((r) => setTimeout(r, 50))
 
       expect(messages).to.be.deep.equal([{

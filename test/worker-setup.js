@@ -1,3 +1,9 @@
+// Patch the global scope before anything else
+const { MessageChannel, MessagePort } = require('worker_threads')
+
+global.MessageChannel = MessageChannel
+global.MessagePort = MessagePort
+
 const loglvl = require('loglevel')
 const core = require('../dist/mx-host-core-worker')
 const chalk = require('chalk')

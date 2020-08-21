@@ -2,6 +2,8 @@ import * as rpc from 'rpcchannel'
 import * as loglvl from 'loglevel'
 import { ValidationError, ValidateFunction } from 'ajv'
 
+import * as utils from '../../utils'
+
 import {
   GeneratorListener,
   MapGeneratorListener
@@ -18,6 +20,11 @@ import {
 
 import * as Permissions from './permissions'
 import Manifest from './manifest'
+
+/**
+ * @todo Move constants to a central location
+ */
+const APP_TOKEN_TIMEOUT = 30000
 
 class App {
   public readonly permissions = new GeneratorListener<string[]>([])
@@ -99,6 +106,12 @@ interface ManifestResponse {
   unknown_permissions: string[]
 }
 
+interface TokenContext {
+  port: MessagePort
+  context: Permissions.Context
+  clear: () => void
+}
+
 interface RemoteV0 {
   placeholder: string
 }
@@ -114,6 +127,8 @@ class ServiceClass implements Service {
   readonly associations: {
     [account: string]: MapGeneratorListener<Association>
   } = {}
+
+  readonly app_tokens = new Map<string, TokenContext>()
 
   constructor(
     protected readonly parent: MainWorker,
@@ -328,7 +343,15 @@ class ServiceClass implements Service {
     return this.getAssocTable(ac_id).generateMap()
   }
 
-  @rpc.RpcAddress(['v0', undefined, 'userapp', undefined, 'entry', undefined])
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'userapp',
+    undefined,
+    'entry',
+    undefined,
+    'setup'
+  ])
   @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand', 'pass'])
   @rpc.EnforceMethodArgSchema({
     type: 'array',
@@ -344,7 +367,7 @@ class ServiceClass implements Service {
     app_url: string,
     entry: string,
     provided_ctx: Permissions.Context.Base
-  ): { port: MessagePort; context: Permissions.Context } {
+  ): { token: string; timeout: number } {
     const app = this.getAccount(account_id).value[app_url]
     if (!app) {
       throw new TypeError('App has not been registered')
@@ -379,8 +402,39 @@ class ServiceClass implements Service {
       }
     }
     app.permissions.value.forEach(addPermission)
+    // Apps need to be able to request services to work
+    addPermission('a.services.request')
 
-    return { port: channel.port2, context }
+    const token = utils.generateUniqueKey(32, (k) => this.app_tokens.has(k))
+
+    // This ensures that app tokens are cleaned up once used or are garbage
+    // collected if not used
+    const timeout = APP_TOKEN_TIMEOUT
+    // eslint-disable-next-line prefer-const
+    let timer: NodeJS.Timeout
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this
+    const clear = (): void => {
+      self.app_tokens.delete(token)
+      clearTimeout(timer)
+    }
+    timer = setTimeout(clear, timeout)
+
+    this.app_tokens.set(token, { port: channel.port2, context, clear })
+    return { token, timeout }
+  }
+
+  @rpc.RpcAddress(['v0', 'redeemToken', undefined])
+  @rpc.RemapArguments(['drop', 'expand'])
+  redeemEntryToken(
+    token: string
+  ): { port: MessagePort; context: Permissions.Context } {
+    const tokenctx = this.app_tokens.get(token)
+    if (!tokenctx) {
+      throw new TypeError('Token does not exist or has expired')
+    }
+    tokenctx.clear()
+    return { port: tokenctx.port, context: tokenctx.context }
   }
 }
 
