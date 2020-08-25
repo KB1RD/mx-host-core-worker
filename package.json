@@ -1,6 +1,6 @@
 {
   "name": "mx-host-core-worker",
-  "version": "0.2.1a",
+  "version": "0.2.2a",
   "description": "Generic worker code for a Matrix application host",
   "main": "dist/mx-host-core-worker.min.js",
   "types": "dist/index.d.ts",

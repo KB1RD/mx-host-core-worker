@@ -56,11 +56,15 @@ const worker = new core.default({
 })
 
 worker.ononline()
-onoffline = () => {
-  worker.onoffline()
-}
-ononline = () => {
-  worker.ononline()
+try {
+  onoffline = () => {
+    worker.onoffline()
+  }
+  ononline = () => {
+    worker.ononline()
+  }
+} catch (e) {
+  console.warn('Failed to set up worker online/offline listeners')
 }
 
 export { worker }
