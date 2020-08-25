@@ -328,6 +328,18 @@ describe('[apps v0] matrix/index.ts', () => {
         ['net.kb1rd.richtext']: { to: 'https://url2' }
       })
     })
+    it('listen responds to removal', async () => {
+      const gen = generate('abc123', 'assoc', 'listen')
+      expect((await gen.next()).value).to.be.deep.equal({})
+
+      await aapi['abc123'].assoc['net.kb1rd.plaintext'].set('https://url')
+      expect((await gen.next()).value).to.be.deep.equal({
+        ['net.kb1rd.plaintext']: { to: 'https://url' }
+      })
+
+      await aapi['abc123'].assoc['net.kb1rd.plaintext'].set(undefined)
+      expect((await gen.next()).value).to.be.deep.equal({})
+    })
     it('listen returns updates to same association', async () => {
       const gen = generate('abc123', 'assoc', 'listen')
       expect((await gen.next()).value).to.be.deep.equal({})

@@ -1,5 +1,5 @@
 class GeneratorListener<T> {
-  protected callbacks = new Set<() => void>()
+  callbacks = new Set<() => void>()
   constructor(protected _value: T) {}
   pushUpdate(): void {
     this.callbacks.forEach((c) => c())
@@ -75,6 +75,20 @@ class MapGeneratorListener<V> {
   get value(): { [key: string]: V } {
     // eslint-disable-next-line
     const self = this
+    const setKey = (key: string, val: V | undefined): void => {
+      const prev = self.map[key]
+      if (val) {
+        self.map[key] = val
+      } else {
+        delete self.map[key]
+      }
+      if (val !== prev) {
+        if (val ? !prev : prev) {
+          self.pushKeyUpdate()
+        }
+        self.pushUpdate(key)
+      }
+    }
     return new Proxy(self.map, {
       ownKeys(): string[] {
         return Object.keys(self.map)
@@ -85,17 +99,12 @@ class MapGeneratorListener<V> {
       get(target: { [key: string]: V }, key: string): V | undefined {
         return self.map[key]
       },
+      deleteProperty(target: { [key: string]: V }, key: string): boolean {
+        setKey(key, undefined)
+        return true
+      },
       set(target: { [key: string]: V }, key: string, val: V): boolean {
-        const prev = self.map[key]
-        if (val) {
-          self.map[key] = val
-        } else {
-          delete self.map[key]
-        }
-        if (val ? !prev : prev) {
-          self.pushKeyUpdate()
-        }
-        self.pushUpdate(key)
+        setKey(key, val)
         return true
       }
     })
