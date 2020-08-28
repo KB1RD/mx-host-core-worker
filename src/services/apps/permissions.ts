@@ -77,12 +77,16 @@ const mxbindings_permissions: PermissionTable = {
    * Permission to get room display information (name, avatar, aliases)
    */
   ['a.openroom.displayinfo']: {
-    grantOn(map, { room_id }) {
+    grantOn(map, { room_id, account_id }) {
       if (!room_id) {
         throw new TypeError(
           'Tried to grant room permissions in context without room'
         )
       }
+      map.put(
+        [...mxb0_base, account_id, 'room', room_id, 'listenDetails'],
+        AccessPolicy.ALLOW
+      )
     },
     inherits: []
   },
@@ -112,7 +116,7 @@ const mxbindings_permissions: PermissionTable = {
       set(AccessPolicy.DENY, 'm.room.third_party_invite')
       set(AccessPolicy.DENY, 'm.room.server_acl')
     },
-    inherits: []
+    inherits: ['a.openroom.displayinfo']
   },
   /**
    * Permission to set room state with the following exceptions:

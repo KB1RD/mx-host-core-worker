@@ -721,7 +721,7 @@ class ServiceClass implements Service {
 const MatrixService: ServiceDescriptor = prefixServiceRpc({
   id: ['net', 'kb1rd', 'mxbindings'],
   service: ServiceClass,
-  versions: [{ version: [0, 2, 0] as SemverVersion }]
+  versions: [{ version: [0, 3, 0] as SemverVersion }]
 })
 
 export default MatrixService
