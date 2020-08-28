@@ -371,7 +371,7 @@ describe('[matrix v0] matrix/index.ts', () => {
       `accounts/${id}/net.kb1rd.mxbindings.credentials`
     ] = JSON.stringify(cred)
   }
-  describe('listenRoomList', () => {
+  describe('listenRoomList/listenRoomDetails', () => {
     const mxClientStartWithState = (id) => mxClientStart(id, () => undefined, {
       next_batch: 'batch_token',
       rooms: {
@@ -556,6 +556,27 @@ describe('[matrix v0] matrix/index.ts', () => {
           type: 'net.kb1rd.test'
         }
       ])
+      expect(await aapi[id].stop()).to.be.true
+    })
+    // This is derived from the code above and relies on the well-tested
+    // MapGeneratorListener, so this should be fine
+    it('listenRoomDetails works', async function () {
+      const id = await rpc.call_obj.net.kb1rd.accounts.v0.createAccount()
+      setCredentials(id, {
+        mxid: '@alice:example.com',
+        token: 'abc123',
+        hs: 'https://matrix.example.com'
+      })
+      await mxClientStartWithState(id)
+      const roomlist = await aapi[id].room['!726s6s6q:example.com']
+        .listenDetails()
+      expect(roomlist).to.be.deep.equal({
+        id: '!726s6s6q:example.com',
+        name: 'Test!',
+        canon_alias: '#abc:example.com',
+        avatar_url: 'https://matrix.example.com/_matrix/media/r0/thumbnail/example.com/JWEIFJgwEIhweiWJE?width=256&height=256&method=scale',
+        type: 'net.kb1rd.plaintext'
+      })
       expect(await aapi[id].stop()).to.be.true
     })
   })
