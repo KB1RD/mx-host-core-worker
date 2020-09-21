@@ -367,7 +367,7 @@ class ServiceClass implements Service {
     undefined,
     'entry',
     undefined,
-    'setup'
+    'setupGet'
   ])
   @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand', 'pass'])
   @rpc.EnforceMethodArgSchema({
@@ -379,12 +379,12 @@ class ServiceClass implements Service {
       Permissions.Context.Base.Schema
     ]
   })
-  setupEntryChannel(
+  setupAndGetEntryChannel(
     account_id: string,
     app_url: string,
     entry: string,
     provided_ctx: Permissions.Context.Base
-  ): { token: string; timeout: number } {
+  ): { port: MessagePort; context: Permissions.Context } {
     const app = this.getAccount(account_id).value[app_url]
     if (!app) {
       throw new TypeError('App has not been registered')
@@ -422,6 +422,41 @@ class ServiceClass implements Service {
     // Apps need to be able to request services to work
     addPermission('a.services.request')
 
+    return { port: channel.port2, context }
+  }
+
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'userapp',
+    undefined,
+    'entry',
+    undefined,
+    'setup'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand', 'pass'])
+  @rpc.EnforceMethodArgSchema({
+    type: 'array',
+    items: [
+      { type: 'string' },
+      { type: 'string' },
+      { type: 'string' },
+      Permissions.Context.Base.Schema
+    ]
+  })
+  setupEntryChannel(
+    account_id: string,
+    app_url: string,
+    entry: string,
+    provided_ctx: Permissions.Context.Base
+  ): { token: string; timeout: number } {
+    const { port, context } = this.setupAndGetEntryChannel(
+      account_id,
+      app_url,
+      entry,
+      provided_ctx
+    )
+
     const token = utils.generateUniqueKey(32, (k) => this.app_tokens.has(k))
 
     // This ensures that app tokens are cleaned up once used or are garbage
@@ -437,7 +472,7 @@ class ServiceClass implements Service {
     }
     timer = setTimeout(clear, timeout)
 
-    this.app_tokens.set(token, { port: channel.port2, context, clear })
+    this.app_tokens.set(token, { port, context, clear })
     return { token, timeout }
   }
 
@@ -458,7 +493,7 @@ class ServiceClass implements Service {
 const AppsService: ServiceDescriptor = prefixServiceRpc({
   id: ['net', 'kb1rd', 'apps'],
   service: ServiceClass,
-  versions: [{ version: [0, 1, 0] as SemverVersion }]
+  versions: [{ version: [0, 2, 0] as SemverVersion }]
 })
 
 export default AppsService

@@ -122,8 +122,9 @@ describe('[apps v0] matrix/index.ts', () => {
       expect(await promise).to.be.deep.equal({
         manifest,
         known_permissions: {
+          ['a.openroom.displayinfo']: { inherits: [] },
           ['a.openroom.state.set']: { inherits: ['a.openroom.state.get'] },
-          ['a.openroom.state.get']: { inherits: [] }
+          ['a.openroom.state.get']: { inherits: ['a.openroom.displayinfo'] }
         },
         unknown_permissions: ['not.a.real.permission']
       })
