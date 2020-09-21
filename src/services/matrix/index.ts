@@ -89,43 +89,6 @@ type ClientState =
     }
   | { state: 'UNAUTHENTICATED' }
 
-type RoomInfo = {
-  id: string
-  name: string
-  canon_alias?: string
-  avatar_url?: string
-  type?: string
-}
-const getRoomType = (r: mx.Room): string | undefined => {
-  const type = r
-    .getLiveTimeline()
-    .getState('f')
-    .getStateEvents(EventTypes.state_room_type, '')?.event?.content?.type
-  return typeof type === 'string' ? type : undefined
-}
-
-type RoomDetailOpts = { avatar?: { width: number; height: number } }
-const mapToAppDetails = (
-  r: mx.Room,
-  instance: MatrixInstance,
-  opts: RoomDetailOpts
-): RoomInfo => ({
-  id: r.roomId,
-  name: r.name,
-  canon_alias: r.getCanonicalAlias() || undefined,
-  avatar_url:
-    r.getAvatarUrl(
-      // Can't be undefined since room list is made blank when there's no
-      // client set up
-      (instance.client as mx.MatrixClient).getHomeserverUrl(),
-      opts.avatar?.width || 256,
-      opts.avatar?.height || 256,
-      'scale',
-      false
-    ) || undefined,
-  type: getRoomType(r) || undefined
-})
-
 interface RemoteV0 {
   getHsUrl: { [mxid: string]: () => Promise<string> }
   fromToken: {
@@ -162,18 +125,64 @@ interface AppGenSet {
   permgen: AsyncGenerator<string[], void, void>
 }
 
+type RoomInfo = {
+  id: string
+  name: string
+  canon_alias?: string
+  avatar_url?: string
+  type?: string
+}
+type RoomDetailOpts = { avatar?: { width: number; height: number } }
+class RoomInstance {
+  constructor(
+    protected readonly parent: MatrixInstance,
+    public readonly room: mx.Room
+  ) {}
+
+  getType(): string | undefined {
+    const type = this.room
+      .getLiveTimeline()
+      .getState('f')
+      .getStateEvents(EventTypes.state_room_type, '')?.event?.content?.type
+    return typeof type === 'string' ? type : undefined
+  }
+  getDetails(opts?: RoomDetailOpts) {
+    return {
+      id: this.room.roomId,
+      name: this.room.name,
+      canon_alias: this.room.getCanonicalAlias() || undefined,
+      avatar_url:
+        this.room.getAvatarUrl(
+          // Can't be undefined since room list is made blank when there's no
+          // client set up
+          (this.parent.client as mx.MatrixClient).getHomeserverUrl(),
+          opts?.avatar?.width || 256,
+          opts?.avatar?.height || 256,
+          'scale',
+          false
+        ) || undefined,
+      type: this.getType() || undefined
+    }
+  }
+}
+
 class MatrixInstance {
   client: mx.MatrixClient | undefined
+
+  /**
+   * State of this Matrix instance
+   */
+  state = new GeneratorListener<AccountState>('UNAUTHENTICATED')
+
   /**
    * List of user's rooms
    */
-  readonly room_list = new MapGeneratorListener<mx.Room>()
+  readonly room_list = new MapGeneratorListener<RoomInstance>()
+
   /**
    * User account data
    */
   readonly user_ad = new MapGeneratorListener<AccountDataEntry>()
-
-  state = new GeneratorListener<AccountState>('UNAUTHENTICATED')
 
   protected app_list_gen?: AsyncGenerator<string[], void, void>
   protected readonly app_gens: { [key: string]: AppGenSet } = {}
@@ -242,7 +251,6 @@ class MatrixInstance {
     this.parent.log.info(
       `Matrix updated app ${config.manifest_url} on account ${this.account_id}`
     )
-    // this.parent.log.info('APP', JSON.stringify(app))
     this.parent.apps_svc.pushApp(this.account_id, app)
   }
 
@@ -254,10 +262,10 @@ class MatrixInstance {
       const rooms = (this.client as mx.MatrixClient).getRooms()
       const ids = new Set<string>()
       rooms.forEach((room) => {
-        if (this.room_list.value[room.roomId] === room) {
+        if (this.room_list.value[room.roomId].room === room) {
           this.room_list.pushUpdate(room.roomId)
         } else {
-          this.room_list.value[room.roomId] = room
+          this.room_list.value[room.roomId] = new RoomInstance(this, room)
         }
         ids.add(room.roomId)
       })
@@ -653,9 +661,7 @@ class ServiceClass implements Service {
     )) {
       yield Object.keys(rooms)
         .map((k) => rooms[k])
-        .map((room) =>
-          mapToAppDetails(room, this.getInstance(id) as MatrixInstance, opts)
-        )
+        .map((room) => room.getDetails(opts))
     }
   }
   @rpc.RpcAddress(['v0', undefined, 'room', undefined, 'listenDetails'])
@@ -687,8 +693,7 @@ class ServiceClass implements Service {
       this.instances.generate(account),
       (i) => (i ? i.room_list.generate(id) : yieldSingle(undefined))
     )) {
-      yield room &&
-        mapToAppDetails(room, this.getInstance(account) as MatrixInstance, opts)
+      yield room && room.getDetails(opts)
     }
   }
 
