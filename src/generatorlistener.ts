@@ -111,4 +111,154 @@ class MapGeneratorListener<V> {
   }
 }
 
-export { GeneratorListener, MapGeneratorListener }
+type ValuePusher<T, R = T> = {
+  gen: AsyncGenerator<T, R | undefined, void>
+  yield: (v: T) => void
+  return: (v: R) => void
+}
+
+function createValuePusher<T, R = T>(): ValuePusher<T, R> {
+  let _push: () => void
+  let promise: Promise<unknown>
+  const outbound_value_queue: IteratorResult<T, R>[] = []
+  const nextPromise = () => {
+    promise = new Promise(
+      (r) =>
+        (_push = () => {
+          nextPromise()
+          r()
+        })
+    )
+  }
+  nextPromise()
+
+  let isdone = false
+
+  const push = (v: IteratorResult<T, R>) => {
+    outbound_value_queue.push(v)
+    _push()
+  }
+  const yld = (value: T) => push({ value, done: false })
+  const ret = (value: R) => {
+    push({ value, done: true })
+    isdone = true
+  }
+
+  const gen: AsyncGenerator<T, R | undefined, void> = {
+    async next(): Promise<IteratorResult<T, R | undefined>> {
+      do {
+        if (outbound_value_queue.length) {
+          return outbound_value_queue.shift() as IteratorResult<
+            T,
+            R | undefined
+          >
+        } else if (isdone) {
+          return { done: true, value: undefined }
+        }
+        await promise
+      } while (true)
+    },
+    async return(val: R) {
+      isdone = true
+      return { done: true, value: val }
+    },
+    async throw(e: Error) {
+      isdone = true
+      throw e
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    }
+  }
+
+  return { gen, yield: yld, return: ret }
+}
+
+function chainGen<T>(
+  genin: AsyncGenerator<AsyncGenerator<T, unknown, void>, void, void>
+): AsyncGenerator<T, void, void> {
+  const genout = createValuePusher<T, undefined>()
+
+  let pub_gen: AsyncGenerator<T, unknown, void> | undefined
+  async function startChaining() {
+    if (!pub_gen) {
+      return
+    }
+    const gen = pub_gen
+    for await (const val of gen) {
+      if (gen !== pub_gen) {
+        break
+      }
+      genout.yield(val)
+    }
+  }
+
+  ;(async function () {
+    for await (const nextgen of genin) {
+      if (pub_gen) {
+        // Ensure that the generator is stopped
+        pub_gen.return(undefined)
+      }
+      pub_gen = nextgen
+      startChaining()
+    }
+    genout.return(undefined)
+  })()
+
+  return genout.gen
+}
+
+async function* mapGen<T1, R1, T2, R2, MR extends ((v: R1) => R2) | undefined>(
+  genin: AsyncGenerator<T1, R1, void>,
+  mapT: (v: T1) => T2,
+  mapR: MR
+): AsyncGenerator<T2, MR extends undefined ? undefined : R2, void> {
+  let done, value
+  while (({ done, value } = await genin.next()) && !done) {
+    // This cannot run if `done` is true
+    yield mapT(value as T1)
+  }
+  // Likewise, this cannot run unless `done` is true
+  if (mapR) {
+    return mapR(value as R1) as MR extends undefined ? undefined : R2
+  } else {
+    return undefined as MR extends undefined ? undefined : R2
+  }
+}
+
+function chainMapGen<T1, T2>(
+  genin: AsyncGenerator<T1, unknown, void>,
+  mapT: (v: T1) => AsyncGenerator<T2>
+): AsyncGenerator<T2> {
+  return chainGen(mapGen(genin, mapT, undefined))
+}
+
+async function* yieldSingle<T>(v: T): AsyncGenerator<T, void, void> {
+  yield v
+  // This promise will never resolve
+  await new Promise(() => undefined)
+}
+
+/* type ChainedGeneratorResult<T, R> = AsyncGenerator<T, R, void> & () => ChainedGeneratorResult<T, R> */
+
+/* type AnyChainedGeneratorResult = ChainedGeneratorResult<unknown, unknown, AnyChainedGeneratorResult>
+
+interface ChainedGeneratorResult<T, R, F extends AnyChainedGeneratorResult> extends AsyncGenerator<T, R, void> {
+  T?: T
+  R?: R
+  F?: F
+  (chain: (v: T) => AsyncGenerator<NonNullable<F['T']>, NonNullable<F['R']>, void>): ChainedGeneratorResult<NonNullable<F['T']>, NonNullable<F['R']>, NonNullable<F['F']>>
+}
+
+function chain<T, R, F extends AnyChainedGeneratorResult>(gen: AsyncGenerator<T, R, void>): ChainedGeneratorResult<T, R, F> {
+  return Object.assign((chain: ))
+} */
+
+export {
+  GeneratorListener,
+  MapGeneratorListener,
+  chainGen,
+  mapGen,
+  chainMapGen,
+  yieldSingle
+}

@@ -19,7 +19,9 @@ import * as AccountsService from '../accounts'
 import * as AppsService from '../apps'
 import {
   GeneratorListener,
-  MapGeneratorListener
+  MapGeneratorListener,
+  chainMapGen,
+  yieldSingle
 } from '../../generatorlistener'
 import { OptionalSerializable } from '../../storage'
 import { Serializable } from 'child_process'
@@ -171,6 +173,8 @@ class MatrixInstance {
    */
   readonly user_ad = new MapGeneratorListener<AccountDataEntry>()
 
+  state = new GeneratorListener<AccountState>('UNAUTHENTICATED')
+
   protected app_list_gen?: AsyncGenerator<string[], void, void>
   protected readonly app_gens: { [key: string]: AppGenSet } = {}
 
@@ -181,6 +185,30 @@ class MatrixInstance {
 
   get active(): boolean {
     return Boolean(this.client)
+  }
+
+  async populateAuthState() {
+    if (
+      this.state.value !== 'UNAUTHENTICATED' &&
+      this.state.value !== 'INACTIVE'
+    ) {
+      return
+    }
+    const account = this.parent.account_svc.getAccount(this.account_id)
+
+    let cred: AccountCredentialData | undefined = undefined
+    try {
+      cred = (await account.storageGetSchema(
+        'net.kb1rd.mxbindings.credentials',
+        accountCredentialSchema
+      )) as { mxid: string; token: string; hs: string }
+    } catch (e) {}
+
+    if (!cred) {
+      this.state.value = 'UNAUTHENTICATED'
+    } else {
+      this.state.value = 'INACTIVE'
+    }
   }
 
   getAdGenerator(type: string): AsyncGenerator<AccountDataEntry, void, void> {
@@ -338,14 +366,10 @@ class MatrixInstance {
 }
 
 class ServiceClass implements Service {
-  protected readonly account_svc: AccountsService.ServiceClass
+  readonly account_svc: AccountsService.ServiceClass
   readonly apps_svc: AppsService.ServiceClass
 
-  protected readonly state_listeners: {
-    [uid: string]: GeneratorListener<AccountState>
-  } = {}
-
-  protected readonly instances: { [uid: string]: MatrixInstance } = {}
+  protected readonly instances = new MapGeneratorListener<MatrixInstance>()
 
   readonly validateAppConfig: ValidateFunction
 
@@ -370,11 +394,8 @@ class ServiceClass implements Service {
     this.validateAppConfig = this.apps_svc.validateAppConfig
   }
 
-  getInstance(uid: string): MatrixInstance {
-    if (!this.instances[uid]) {
-      this.instances[uid] = new MatrixInstance(this, uid)
-    }
-    return this.instances[uid]
+  getInstance(uid: string): MatrixInstance | undefined {
+    return this.instances.value[uid]
   }
 
   @rpc.RpcAddress(['v0', 'getHsUrl', undefined])
@@ -468,8 +489,9 @@ class ServiceClass implements Service {
   @rpc.RpcAddress(['v0', undefined, 'start'])
   @rpc.RemapArguments(['drop', 'expand'])
   async start(account_id: string): Promise<void> {
-    if (this.getInstance(account_id).active) {
-      const val = this.state_listeners[account_id]?.value
+    let instance = this.getInstance(account_id)
+    if (instance?.active) {
+      const val = instance.state.value
       if (!val || val === 'INACTIVE' || val === 'UNAUTHENTICATED') {
         // The account state is corrupt; Try to recover gracefully
         this.log.warn(
@@ -487,7 +509,6 @@ class ServiceClass implements Service {
     if (!account) {
       throw new TypeError('Account does not exist')
     }
-    await this.ensureAccountStateExists(account_id)
 
     let cred: AccountCredentialData
     try {
@@ -505,8 +526,12 @@ class ServiceClass implements Service {
       }
     }
 
-    this.state_listeners[account_id].value = 'STARTING'
-    const instance = this.getInstance(account_id)
+    if (!instance) {
+      instance = new MatrixInstance(this, account_id)
+      this.instances.value[account_id] = instance
+      await instance.populateAuthState()
+    }
+    instance.state.value = 'STARTING'
     const client = instance.createClient({
       userId: cred.mxid,
       baseUrl: cred.hs,
@@ -521,17 +546,17 @@ class ServiceClass implements Service {
       switch (state) {
         case 'PREPARED':
         case 'SYNCING':
-          this.state_listeners[account_id].value = 'ACTIVE'
+          ;(instance as MatrixInstance).state.value = 'ACTIVE'
           return
         case 'ERROR':
         case 'RECONNECTING':
-          this.state_listeners[account_id].value = 'OFFLINE'
+          ;(instance as MatrixInstance).state.value = 'OFFLINE'
           return
         case 'CATCHUP':
-          this.state_listeners[account_id].value = 'STARTING'
+          ;(instance as MatrixInstance).state.value = 'STARTING'
           return
         case 'STOPPED':
-          this.state_listeners[account_id].value = 'INACTIVE'
+          ;(instance as MatrixInstance).state.value = 'INACTIVE'
           return
       }
     })
@@ -544,52 +569,28 @@ class ServiceClass implements Service {
   @rpc.RpcAddress(['v0', undefined, 'stop'])
   @rpc.RemapArguments(['drop', 'expand'])
   async stop(id: string): Promise<boolean> {
-    await this.ensureAccountStateExists(id)
-    const instance = this.instances[id]
+    const instance = this.instances.value[id]
     if (instance) {
       await instance.stopClient()
-      this.state_listeners[id].value = 'INACTIVE'
+      instance.state.value = 'INACTIVE'
       return true
     }
     return false
   }
 
-  async ensureAccountStateExists(id: string): Promise<void> {
-    if (!this.state_listeners[id]) {
-      const account = this.account_svc.getAccount(id)
-
-      let cred: AccountCredentialData | undefined = undefined
-      try {
-        cred = (await account.storageGetSchema(
-          'net.kb1rd.mxbindings.credentials',
-          accountCredentialSchema
-        )) as { mxid: string; token: string; hs: string }
-      } catch (e) {}
-
-      if (!cred) {
-        this.state_listeners[id] = new GeneratorListener('UNAUTHENTICATED')
-      } else {
-        this.state_listeners[id] = new GeneratorListener('INACTIVE')
-      }
-    }
-  }
-  async updateAccountState(id: string, state?: AccountState): Promise<void> {
-    await this.ensureAccountStateExists(id)
-    if (state) {
-      this.state_listeners[id].value = state
-    }
-  }
-
   @rpc.RpcAddress(['v0', undefined, 'listenUserState'])
   @rpc.RemapArguments(['drop', 'expand'])
   async *listenUserState(id: string): AsyncGenerator<ClientState, void, void> {
-    await this.ensureAccountStateExists(id)
     const account = this.account_svc.getAccount(id)
     if (!account) {
       throw new TypeError(`Account '${id}' does not exist`)
     }
 
-    for await (const state of this.state_listeners[id].generate()) {
+    for await (const state of chainMapGen(
+      this.instances.generate(id),
+      (i): AsyncGenerator<AccountState, void, void> =>
+        i ? i.state.generate() : yieldSingle('UNAUTHENTICATED')
+    )) {
       let data: AccountCredentialData | undefined
       try {
         data = (await account.storageGetSchema(
@@ -613,7 +614,11 @@ class ServiceClass implements Service {
           display_name: data.display_name || data.mxid,
           // TODO: Implement avatar cache
           avatar: undefined,
-          state
+          // The instance may not have been created, so the above `yieldSingle`
+          // will return `UNAUTHENTICATED` in this case. The correct value is
+          // `INACTIVE` since we just confirmed that there are credentials in
+          // storage
+          state: state === 'UNAUTHENTICATED' ? 'INACTIVE' : state
         }
       }
     }
@@ -643,11 +648,14 @@ class ServiceClass implements Service {
     id: string,
     opts: { avatar?: { width: number; height: number } } = {}
   ): AsyncGenerator<RoomInfo[], void, void> {
-    const instance = this.getInstance(id)
-    for await (const rooms of instance.room_list.generateMap()) {
+    for await (const rooms of chainMapGen(this.instances.generate(id), (i) =>
+      i ? i.room_list.generateMap() : yieldSingle({})
+    )) {
       yield Object.keys(rooms)
         .map((k) => rooms[k])
-        .map((room) => mapToAppDetails(room, instance, opts))
+        .map((room) =>
+          mapToAppDetails(room, this.getInstance(id) as MatrixInstance, opts)
+        )
     }
   }
   @rpc.RpcAddress(['v0', undefined, 'room', undefined, 'listenDetails'])
@@ -675,9 +683,12 @@ class ServiceClass implements Service {
     id: string,
     opts: RoomDetailOpts = {}
   ): AsyncGenerator<RoomInfo | undefined, void, void> {
-    const instance = this.getInstance(account)
-    for await (const room of instance.room_list.generate(id)) {
-      yield room && mapToAppDetails(room, instance, opts)
+    for await (const room of chainMapGen(
+      this.instances.generate(account),
+      (i) => (i ? i.room_list.generate(id) : yieldSingle(undefined))
+    )) {
+      yield room &&
+        mapToAppDetails(room, this.getInstance(account) as MatrixInstance, opts)
     }
   }
 
@@ -693,16 +704,18 @@ class ServiceClass implements Service {
     type: string,
     data: AccountDataType
   ): Promise<void> {
-    const { client } = this.getInstance(id)
-    if (!client) {
+    const instance = this.getInstance(id)
+    if (!instance || !instance.client) {
       throw new TypeError('Client not set up')
     }
-    await client.setAccountData(type, data)
+    await instance.client.setAccountData(type, data)
   }
   @rpc.RpcAddress(['v0', undefined, 'account_data', 'listen'])
   @rpc.RemapArguments(['drop', 'expand'])
   listenAccountDataKeys(id: string): AsyncGenerator<string[], void, void> {
-    return this.getInstance(id).user_ad.generateKeys()
+    return chainMapGen(this.instances.generate(id), (i) =>
+      i ? i.user_ad.generateKeys() : yieldSingle([])
+    )
   }
   @rpc.RpcAddress(['v0', undefined, 'account_data', undefined, 'listen'])
   @rpc.RemapArguments(['drop', 'expand', 'expand'])
@@ -714,7 +727,9 @@ class ServiceClass implements Service {
     id: string,
     type: string
   ): AsyncGenerator<AccountDataEntry, void, void> {
-    return this.getInstance(id).getAdGenerator(type)
+    return chainMapGen(this.instances.generate(id), (i) =>
+      i ? i.user_ad.generate(type) : yieldSingle(undefined)
+    )
   }
 }
 
