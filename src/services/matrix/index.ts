@@ -117,8 +117,12 @@ interface Remote {
   v0: RemoteV0
 }
 
-type AccountDataType = { [k: string]: OptionalSerializable }
-type AccountDataEntry = undefined | AccountDataType
+type EventDataType = { [k: string]: OptionalSerializable }
+type EventDataEntry = undefined | EventDataType
+type AccountDataType = EventDataType
+type AccountDataEntry = EventDataEntry
+type StateType = EventDataType
+type StateEntry = EventDataEntry
 
 interface AppGenSet {
   detailgen: AsyncGenerator<AppDetails | undefined, void, void>
@@ -133,11 +137,33 @@ type RoomInfo = {
   type?: string
 }
 type RoomDetailOpts = { avatar?: { width: number; height: number } }
+
 class RoomInstance {
+  /**
+   * Current complete room state
+   */
+  readonly state = new MapGeneratorListener<MapGeneratorListener<StateEntry>>()
   constructor(
     protected readonly parent: MatrixInstance,
     public readonly room: mx.Room
   ) {}
+
+  protected get client(): mx.MatrixClient {
+    // If this room exists, the client MUST be defined
+    return this.parent.client as mx.MatrixClient
+  }
+
+  populateRoomState(): void {
+    for (const [type, submap] of this.room.getLiveTimeline().getState('f')
+      .events) {
+      for (const [key, event] of submap) {
+        if (!this.state.value[type]) {
+          this.state.value[type] = new MapGeneratorListener()
+        }
+        this.state.value[type].value[key] = event.getContent()
+      }
+    }
+  }
 
   getType(): string | undefined {
     const type = this.room
@@ -163,6 +189,10 @@ class RoomInstance {
         ) || undefined,
       type: this.getType() || undefined
     }
+  }
+
+  setState(data: StateType, type: string, key = ''): Promise<void> {
+    return this.client.sendStateEvent(this.room.roomId, type, data, key)
   }
 }
 
@@ -223,6 +253,18 @@ class MatrixInstance {
   getAdGenerator(type: string): AsyncGenerator<AccountDataEntry, void, void> {
     return this.user_ad.generate(type)
   }
+  getStateGenerator(
+    room: string,
+    type: string,
+    key = ''
+  ): AsyncGenerator<StateEntry, void, void> {
+    return chainMapGen(
+      chainMapGen(this.room_list.generate(room), (r) =>
+        r ? r.state.generate(type) : yieldSingle(undefined)
+      ),
+      (s) => (s ? s.generate(key) : yieldSingle(undefined))
+    )
+  }
 
   _processAppConfig(id: string, obj: Serializable): void {
     try {
@@ -262,10 +304,13 @@ class MatrixInstance {
       const rooms = (this.client as mx.MatrixClient).getRooms()
       const ids = new Set<string>()
       rooms.forEach((room) => {
-        if (this.room_list.value[room.roomId].room === room) {
+        if (this.room_list.value[room.roomId]?.room === room) {
           this.room_list.pushUpdate(room.roomId)
         } else {
           this.room_list.value[room.roomId] = new RoomInstance(this, room)
+          // The `RoomState.events` event is fired before the room object is
+          // added to the client's available room list
+          this.room_list.value[room.roomId].populateRoomState()
         }
         ids.add(room.roomId)
       })
@@ -277,7 +322,21 @@ class MatrixInstance {
     }
     this.client.on('Room', updateRooms)
     this.client.on('Room.name', updateRooms)
-    this.client.on('RoomState.events', updateRooms)
+    this.client.on('RoomState.events', (event) => {
+      const room = this.room_list.value[event.getRoomId()]
+      // The room may be undefined when it was just returned in a sync request
+      // since `RoomState.events` is fired before room list updates
+      if (room) {
+        if (!room.state.value[event.getType()]) {
+          room.state.value[event.getType()] = new MapGeneratorListener()
+        }
+        room.state.value[event.getType()].value[
+          event.getStateKey() || ''
+        ] = event.getContent()
+      }
+
+      updateRooms()
+    })
     this.client.on('deleteRoom', updateRooms)
   }
   onAppUpdate(url: string, doUndef: boolean): void {
@@ -724,16 +783,160 @@ class ServiceClass implements Service {
   }
   @rpc.RpcAddress(['v0', undefined, 'account_data', undefined, 'listen'])
   @rpc.RemapArguments(['drop', 'expand', 'expand'])
-  @rpc.EnforceMethodArgSchema({
-    type: 'array',
-    items: [{ type: 'string' }, { type: 'string' }]
-  })
   listenAccountData(
     id: string,
     type: string
   ): AsyncGenerator<AccountDataEntry, void, void> {
     return chainMapGen(this.instances.generate(id), (i) =>
       i ? i.user_ad.generate(type) : yieldSingle(undefined)
+    )
+  }
+
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    'set'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand'])
+  @rpc.EnforceMethodArgSchema({
+    type: 'array',
+    items: [{ type: 'string' }, { type: 'string' }, { type: 'string' }],
+    minItems: 4
+  })
+  async sendState(
+    id: string,
+    roomid: string,
+    type: string,
+    data: AccountDataType
+  ): Promise<void> {
+    const instance = this.getInstance(id)
+    if (!instance || !instance.client) {
+      throw new TypeError('Client not set up')
+    }
+    const room = instance.room_list.value[roomid]
+    if (!room) {
+      throw new TypeError('Room does not exist')
+    }
+    await room.setState(data, type)
+  }
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    undefined,
+    'set'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand', 'expand'])
+  @rpc.EnforceMethodArgSchema({
+    type: 'array',
+    items: [
+      { type: 'string' },
+      { type: 'string' },
+      { type: 'string' },
+      { type: 'string' }
+    ],
+    minItems: 5
+  })
+  async sendKeyedState(
+    id: string,
+    roomid: string,
+    type: string,
+    key: string,
+    data: StateType
+  ): Promise<void> {
+    const instance = this.getInstance(id)
+    if (!instance || !instance.client) {
+      throw new TypeError('Client not set up')
+    }
+    const room = instance.room_list.value[roomid]
+    if (!room) {
+      throw new TypeError('Room does not exist')
+    }
+    await room.setState(data, type, key)
+  }
+  @rpc.RpcAddress(['v0', undefined, 'room', undefined, 'state', 'listen'])
+  @rpc.RemapArguments(['drop', 'expand', 'expand'])
+  listenStateTypes(
+    id: string,
+    room: string
+  ): AsyncGenerator<string[], void, void> {
+    return chainMapGen(
+      chainMapGen(this.instances.generate(id), (i) =>
+        i ? i.room_list.generate(room) : yieldSingle(undefined)
+      ),
+      (r) => (r ? r.state.generateKeys() : yieldSingle([]))
+    )
+  }
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    'listenKeys'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand'])
+  listenStateKeys(
+    id: string,
+    room: string,
+    type: string
+  ): AsyncGenerator<string[], void, void> {
+    return chainMapGen(
+      chainMapGen(
+        chainMapGen(this.instances.generate(id), (i) =>
+          i ? i.room_list.generate(room) : yieldSingle(undefined)
+        ),
+        (r) => (r ? r.state.generate(type) : yieldSingle(undefined))
+      ),
+      (g) => (g ? g.generateKeys() : yieldSingle([]))
+    )
+  }
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    'listen'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand'])
+  listenState(
+    id: string,
+    room: string,
+    type: string
+  ): AsyncGenerator<AccountDataEntry, void, void> {
+    return chainMapGen(this.instances.generate(id), (i) =>
+      i ? i.getStateGenerator(room, type) : yieldSingle(undefined)
+    )
+  }
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    undefined,
+    'listen'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand', 'expand'])
+  listenKeyedState(
+    id: string,
+    room: string,
+    type: string,
+    key: string
+  ): AsyncGenerator<AccountDataEntry, void, void> {
+    return chainMapGen(this.instances.generate(id), (i) =>
+      i ? i.getStateGenerator(room, type, key) : yieldSingle(undefined)
     )
   }
 }

@@ -4520,10 +4520,10 @@ marked@1.0.0:
   resolved "https://registry.yarnpkg.com/marked/-/marked-1.0.0.tgz#d35784245a04871e5988a491e28867362e941693"
   integrity sha512-Wo+L1pWTVibfrSr+TTtMuiMfNzmZWiOPeO7rZsQUY5bgsxpHesBEcIWJloWVTFnrMXnf/TL30eTFSGJddmQAng==
 
-matrix-js-sdk@^7.1.0:
-  version "7.1.0"
-  resolved "https://registry.yarnpkg.com/matrix-js-sdk/-/matrix-js-sdk-7.1.0.tgz#b3e3304e890df45c827706831748935168ee839f"
-  integrity sha512-Y+MdOfsVQRGx0KcwSdNtwsFNGWUF7Zi7wPxUSa050J8eBlbkXUNFAyuSWviLJ5pUwzmp9XMEKD9Cdv+tGZG1ww==
+matrix-js-sdk@^8.3.0:
+  version "8.3.0"
+  resolved "https://registry.yarnpkg.com/matrix-js-sdk/-/matrix-js-sdk-8.3.0.tgz#a57a6d071619c24b6e8501ae21fa4d21f6bbd052"
+  integrity sha512-ndKedUtZt72/4KWjlMevNwNDGfhPTOn/i4U6Iv1ZEfm7uZfbp5u3hVIyr8tyOiVuvMIxmcTajRdwSlRsNtYFkA==
   dependencies:
     "@babel/runtime" "^7.8.3"
     another-json "^0.2.0"

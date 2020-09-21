@@ -657,4 +657,381 @@ describe('[matrix v0] matrix/index.ts', () => {
       // TODO
     }))
   }) */
+
+  describe('Room state', () => {
+    let mxbindings
+    beforeEach(() => {
+      ;({ mxbindings } = rpc.call_obj.net.kb1rd)
+    })
+    it('send', basicClientTest(async (id) => {
+      const sync_response = {
+        next_batch: 'batch_token',
+        rooms: {
+          join: {
+            '!636q39766251:example.com': {
+              summary: {
+                'm.heroes': ['@alice:example.com', '@bob:example.com'],
+                'm.joined_member_count': 2,
+                'm.invited_member_count': 0
+              },
+              state: {},
+              timeline: {
+                events: [],
+                limited: false,
+                prev_batch: 't34-23535_0_0'
+              },
+              ephemeral: { events: [] },
+              account_data: { events: [] }
+            }
+          },
+          invite: {},
+          leave: {}
+        },
+        presence: {},
+        account_data: { events: [] }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+
+      http
+        .when(
+          'PUT',
+          '/_matrix/client/r0/rooms/!636q39766251%3Aexample.com/state/' +
+            'net.kb1rd.test/'
+        )
+        .check(({ opts }) => {
+          expect(opts.body).to.be.equal('{"hello":"world"}')
+        })
+        .respond(200)
+      const promise = mxbindings
+        .v0[id]
+        .room['!636q39766251:example.com']
+        .state['net.kb1rd.test']
+        .set({
+          hello: "world"
+        })
+      await http.flushAllExpected()
+      await promise
+    }))
+    it('send', basicClientTest(async (id) => {
+      const sync_response = {
+        next_batch: 'batch_token',
+        rooms: {
+          join: {
+            '!636q39766251:example.com': {
+              summary: {
+                'm.heroes': ['@alice:example.com', '@bob:example.com'],
+                'm.joined_member_count': 2,
+                'm.invited_member_count': 0
+              },
+              state: {},
+              timeline: {
+                events: [],
+                limited: false,
+                prev_batch: 't34-23535_0_0'
+              },
+              ephemeral: { events: [] },
+              account_data: { events: [] }
+            }
+          },
+          invite: {},
+          leave: {}
+        },
+        presence: {},
+        account_data: { events: [] }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+
+      http
+        .when(
+          'PUT',
+          '/_matrix/client/r0/rooms/!636q39766251%3Aexample.com/state/' +
+            'net.kb1rd.test/test'
+        )
+        .check(({ opts }) => {
+          expect(opts.body).to.be.equal('{"hello":"world"}')
+        })
+        .respond(200)
+      const promise = mxbindings
+        .v0[id]
+        .room['!636q39766251:example.com']
+        .state['net.kb1rd.test']
+        .test.set({
+          hello: "world"
+        })
+      await http.flushAllExpected()
+      await promise
+    }))
+    it('listen values', basicClientTest(async (id) => {
+      const sync_response = {
+        next_batch: 'batch_token',
+        rooms: {
+          join: {
+            '!726s6s6q:example.com': {
+              summary: {
+                'm.heroes': ['@alice:example.com', '@bob:example.com'],
+                'm.joined_member_count': 2,
+                'm.invited_member_count': 0
+              },
+              state: {
+                events: [
+                  {
+                    content: {
+                      hello: 'world'
+                    },
+                    type: 'net.kb1rd.test',
+                    event_id: '$143273582443PhrSb:example.org',
+                    room_id: '!726s6s6q:example.com',
+                    sender: '@bob:example.org',
+                    origin_server_ts: 1432735824653,
+                    unsigned: { age: 1234 },
+                    state_key: ''
+                  }
+                ]
+              },
+              timeline: {
+                events: [],
+                limited: false,
+                prev_batch: 't34-23535_0_0'
+              },
+              ephemeral: { events: [] },
+              account_data: { events: [] }
+            }
+          },
+          invite: {},
+          leave: {}
+        },
+        presence: {},
+        account_data: { events: [] }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+      expect(
+        await mxbindings
+          .v0[id]
+          .room['!726s6s6q:example.com']
+          .state['net.kb1rd.test']
+          .listen()
+      ).to.be.deep.equal({ hello: 'world' })
+    }))
+    it('listen updates value', basicClientTest(async (id) => {
+      let sync_response = {
+        next_batch: 'batch_token',
+        rooms: {
+          join: {
+            '!726s6s6q:example.com': {
+              summary: {
+                'm.heroes': ['@alice:example.com', '@bob:example.com'],
+                'm.joined_member_count': 2,
+                'm.invited_member_count': 0
+              },
+              state: {
+                events: [
+                  {
+                    content: {
+                      hello: 'test'
+                    },
+                    type: 'net.kb1rd.test',
+                    event_id: '$143273582443PhrSb:example.org',
+                    room_id: '!726s6s6q:example.com',
+                    sender: '@bob:example.org',
+                    origin_server_ts: 1432735824653,
+                    unsigned: { age: 1234 },
+                    state_key: ''
+                  }
+                ]
+              },
+              timeline: {
+                events: [],
+                limited: false,
+                prev_batch: 't34-23535_0_0'
+              },
+              ephemeral: { events: [] },
+              account_data: { events: [] }
+            }
+          },
+          invite: {},
+          leave: {}
+        },
+        presence: {},
+        account_data: { events: [] }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+      expect(
+        await mxbindings
+          .v0[id]
+          .room['!726s6s6q:example.com']
+          .state['net.kb1rd.test']
+          .listen()
+      ).to.be.deep.equal({ hello: 'test' })
+
+      sync_response = {
+        next_batch: 'batch_token',
+        rooms: {
+          join: {
+            '!726s6s6q:example.com': {
+              summary: {
+                'm.heroes': ['@alice:example.com', '@bob:example.com'],
+                'm.joined_member_count': 2,
+                'm.invited_member_count': 0
+              },
+              state: {
+                events: [
+                  {
+                    content: {
+                      hello: 'world'
+                    },
+                    type: 'net.kb1rd.test',
+                    event_id: '$143273582443PhrSc:example.org',
+                    room_id: '!726s6s6q:example.com',
+                    sender: '@bob:example.org',
+                    origin_server_ts: 1432735824653,
+                    unsigned: { age: 1234 },
+                    state_key: ''
+                  }
+                ]
+              },
+              timeline: {
+                events: [],
+                limited: false,
+                prev_batch: 't34-23535_0_0'
+              },
+              ephemeral: { events: [] },
+              account_data: { events: [] }
+            }
+          },
+          invite: {},
+          leave: {}
+        },
+        presence: {},
+        account_data: { events: [] }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+      expect(
+        await mxbindings
+          .v0[id]
+          .room['!726s6s6q:example.com']
+          .state['net.kb1rd.test']
+          .listen()
+      ).to.be.deep.equal({ hello: 'world' })
+    }))
+    it('listen state types', basicClientTest(async (id) => {
+      const sync_response = {
+        next_batch: 'batch_token',
+        rooms: {
+          join: {
+            '!726s6s6q:example.com': {
+              summary: {
+                'm.heroes': ['@alice:example.com', '@bob:example.com'],
+                'm.joined_member_count': 2,
+                'm.invited_member_count': 0
+              },
+              state: {
+                events: [
+                  {
+                    content: {
+                      hello: 'world'
+                    },
+                    type: 'net.kb1rd.test',
+                    event_id: '$143273582443PhrSb:example.org',
+                    room_id: '!726s6s6q:example.com',
+                    sender: '@bob:example.org',
+                    origin_server_ts: 1432735824653,
+                    unsigned: { age: 1234 },
+                    state_key: ''
+                  }
+                ]
+              },
+              timeline: {
+                events: [],
+                limited: false,
+                prev_batch: 't34-23535_0_0'
+              },
+              ephemeral: { events: [] },
+              account_data: { events: [] }
+            }
+          },
+          invite: {},
+          leave: {}
+        },
+        presence: {},
+        account_data: { events: [] }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+      expect(
+        await mxbindings
+          .v0[id]
+          .room['!726s6s6q:example.com']
+          .state.listen()
+      ).to.be.deep.equal(['net.kb1rd.test'])
+    }))
+    it('listen state keys', basicClientTest(async (id) => {
+      const sync_response = {
+        next_batch: 'batch_token',
+        rooms: {
+          join: {
+            '!726s6s6q:example.com': {
+              summary: {
+                'm.heroes': ['@alice:example.com', '@bob:example.com'],
+                'm.joined_member_count': 2,
+                'm.invited_member_count': 0
+              },
+              state: {
+                events: [
+                  {
+                    content: {
+                      hello: 'world'
+                    },
+                    type: 'net.kb1rd.test',
+                    event_id: '$143273582443PhrSb:example.org',
+                    room_id: '!726s6s6q:example.com',
+                    sender: '@bob:example.org',
+                    origin_server_ts: 1432735824653,
+                    unsigned: { age: 1234 },
+                    state_key: ''
+                  },
+                  {
+                    content: {
+                      hello: 'world'
+                    },
+                    type: 'net.kb1rd.test',
+                    event_id: '$143273582443PhrSc:example.org',
+                    room_id: '!726s6s6q:example.com',
+                    sender: '@bob:example.org',
+                    origin_server_ts: 1432735824653,
+                    unsigned: { age: 1234 },
+                    state_key: 'test'
+                  }
+                ]
+              },
+              timeline: {
+                events: [],
+                limited: false,
+                prev_batch: 't34-23535_0_0'
+              },
+              ephemeral: { events: [] },
+              account_data: { events: [] }
+            }
+          },
+          invite: {},
+          leave: {}
+        },
+        presence: {},
+        account_data: { events: [] }
+      }
+      http.when('GET', '/_matrix/client/r0/sync').respond(200, sync_response)
+      await http.flushAllExpected()
+      expect(
+        await mxbindings
+          .v0[id]
+          .room['!726s6s6q:example.com']
+          .state['net.kb1rd.test']
+          .listenKeys()
+      ).to.be.deep.equal(['', 'test'])
+    }))
+  })
 })
