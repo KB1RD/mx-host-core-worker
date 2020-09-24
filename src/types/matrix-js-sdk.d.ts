@@ -707,6 +707,28 @@ declare module 'matrix-js-sdk/lib/matrix' {
     constructor(event: object)
     getType(): EventType;
     getSender(): string;
+
+    getContent(): object;
+    getId(): string;
+    getWireType(): string;
+    getRoomId(): string;
+    getTs(): number;
+    getDate(): Date;
+    getOriginalContent(): object;
+    getWireContent(): object;
+    getPrevContent(): object;
+    getDirectionalContent(): object;
+    getAge(): number;
+    getLocalAge(): number;
+    getStateKey(): string | undefined;
+    isState(): boolean;
+    isBeingDecrypted(): boolean;
+    isDecryptionFailure(): boolean;
+    cancelAndResendKeyRequest(): Promise<void>;
+
+    getClearContent(): object;
+    isEncrypted(): boolean;
+    getSenderKey(): string | undefined;
   }
 
   export class RoomMember {

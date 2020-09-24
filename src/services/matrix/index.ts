@@ -21,6 +21,7 @@ import {
   GeneratorListener,
   MapGeneratorListener,
   chainMapGen,
+  mapGen,
   yieldSingle
 } from '../../generatorlistener'
 import { OptionalSerializable } from '../../storage'
@@ -142,7 +143,9 @@ class RoomInstance {
   /**
    * Current complete room state
    */
-  readonly state = new MapGeneratorListener<MapGeneratorListener<StateEntry>>()
+  readonly state = new MapGeneratorListener<
+    MapGeneratorListener<mx.MatrixEvent>
+  >()
   constructor(
     protected readonly parent: MatrixInstance,
     public readonly room: mx.Room
@@ -160,7 +163,7 @@ class RoomInstance {
         if (!this.state.value[type]) {
           this.state.value[type] = new MapGeneratorListener()
         }
-        this.state.value[type].value[key] = event.getContent()
+        this.state.value[type].value[key] = event
       }
     }
   }
@@ -257,7 +260,7 @@ class MatrixInstance {
     room: string,
     type: string,
     key = ''
-  ): AsyncGenerator<StateEntry, void, void> {
+  ): AsyncGenerator<mx.MatrixEvent | undefined, void, void> {
     return chainMapGen(
       chainMapGen(this.room_list.generate(room), (r) =>
         r ? r.state.generate(type) : yieldSingle(undefined)
@@ -332,7 +335,7 @@ class MatrixInstance {
         }
         room.state.value[event.getType()].value[
           event.getStateKey() || ''
-        ] = event.getContent()
+        ] = event
       }
 
       updateRooms()
@@ -913,9 +916,13 @@ class ServiceClass implements Service {
     id: string,
     room: string,
     type: string
-  ): AsyncGenerator<AccountDataEntry, void, void> {
-    return chainMapGen(this.instances.generate(id), (i) =>
-      i ? i.getStateGenerator(room, type) : yieldSingle(undefined)
+  ): AsyncGenerator<StateEntry, void, void> {
+    return mapGen(
+      chainMapGen(this.instances.generate(id), (i) =>
+        i ? i.getStateGenerator(room, type) : yieldSingle(undefined)
+      ),
+      (e) => (e ? (e.getContent() as StateEntry) : undefined),
+      () => undefined
     )
   }
   @rpc.RpcAddress([
@@ -934,9 +941,109 @@ class ServiceClass implements Service {
     room: string,
     type: string,
     key: string
-  ): AsyncGenerator<AccountDataEntry, void, void> {
-    return chainMapGen(this.instances.generate(id), (i) =>
-      i ? i.getStateGenerator(room, type, key) : yieldSingle(undefined)
+  ): AsyncGenerator<StateEntry, void, void> {
+    return mapGen(
+      chainMapGen(this.instances.generate(id), (i) =>
+        i ? i.getStateGenerator(room, type, key) : yieldSingle(undefined)
+      ),
+      (e) => (e ? (e.getContent() as StateEntry) : undefined),
+      () => undefined
+    )
+  }
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    'timestamp'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand'])
+  listenTimestamp(
+    id: string,
+    room: string,
+    type: string
+  ): AsyncGenerator<number | undefined, void, void> {
+    return mapGen(
+      chainMapGen(this.instances.generate(id), (i) =>
+        i ? i.getStateGenerator(room, type) : yieldSingle(undefined)
+      ),
+      (e) => (e ? e.getTs() : undefined),
+      () => undefined
+    )
+  }
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    undefined,
+    'timestamp'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand', 'expand'])
+  listenKeyedTimestamp(
+    id: string,
+    room: string,
+    type: string,
+    key: string
+  ): AsyncGenerator<number | undefined, void, void> {
+    return mapGen(
+      chainMapGen(this.instances.generate(id), (i) =>
+        i ? i.getStateGenerator(room, type, key) : yieldSingle(undefined)
+      ),
+      (e) => (e ? e.getTs() : undefined),
+      () => undefined
+    )
+  }
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    'sender'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand'])
+  listenSender(
+    id: string,
+    room: string,
+    type: string
+  ): AsyncGenerator<string | undefined, void, void> {
+    return mapGen(
+      chainMapGen(this.instances.generate(id), (i) =>
+        i ? i.getStateGenerator(room, type) : yieldSingle(undefined)
+      ),
+      (e) => (e ? e.getSender() : undefined),
+      () => undefined
+    )
+  }
+  @rpc.RpcAddress([
+    'v0',
+    undefined,
+    'room',
+    undefined,
+    'state',
+    undefined,
+    undefined,
+    'sender'
+  ])
+  @rpc.RemapArguments(['drop', 'expand', 'expand', 'expand', 'expand'])
+  listenKeyedSender(
+    id: string,
+    room: string,
+    type: string,
+    key: string
+  ): AsyncGenerator<string | undefined, void, void> {
+    return mapGen(
+      chainMapGen(this.instances.generate(id), (i) =>
+        i ? i.getStateGenerator(room, type, key) : yieldSingle(undefined)
+      ),
+      (e) => (e ? e.getSender() : undefined),
+      () => undefined
     )
   }
 }
